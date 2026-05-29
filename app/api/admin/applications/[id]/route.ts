@@ -27,8 +27,12 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const parsed = patchSchema.parse(body)
 
     const updates: Record<string, string> = {}
-    if (parsed.stage) updates.stage = parsed.stage
-    if (parsed.notes) updates.notes = parsed.notes
+    if (parsed.stage !== undefined) updates.stage = parsed.stage
+    if (parsed.notes !== undefined) updates.notes = parsed.notes
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    }
 
     const { data, error } = await db
       .from('applicants')
@@ -38,6 +42,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       .single()
 
     if (error) throw error
+    if (!data) return NextResponse.json({ error: 'Applicant not found' }, { status: 404 })
     return NextResponse.json(data)
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed' }, { status: 400 })

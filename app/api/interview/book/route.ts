@@ -13,18 +13,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'interview_id and slot_id required' }, { status: 400 })
     }
 
-    // Verify slot is still available
+    // Atomically claim the slot — only succeeds if is_booked is still false,
+    // preventing double-booking under concurrent requests.
     const { data: slot } = await db
       .from('interview_slots')
-      .select('*')
+      .update({ is_booked: true })
       .eq('id', slot_id)
       .eq('is_booked', false)
+      .select()
       .single()
 
     if (!slot) return NextResponse.json({ error: 'Slot no longer available' }, { status: 409 })
-
-    // Mark slot as booked
-    await db.from('interview_slots').update({ is_booked: true }).eq('id', slot_id)
 
     // Update interview
     const zoomLink = slot.zoom_link ?? process.env.ZOOM_INTERVIEW_LINK ?? ''
@@ -47,12 +46,11 @@ export async function POST(req: Request) {
 
     const jobTitle = (interview.applicants?.jobs as { title: string } | null)?.title ?? 'the role'
 
-    // Send confirmation email (best effort)
-    sendInterviewConfirmationEmail(
+    await sendInterviewConfirmationEmail(
       interview.applicants as Parameters<typeof sendInterviewConfirmationEmail>[0],
       interview as Parameters<typeof sendInterviewConfirmationEmail>[1],
       jobTitle
-    ).catch(console.error)
+    )
 
     // Schedule reminder emails
     const slotTime = new Date(slot.starts_at)

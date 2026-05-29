@@ -11,6 +11,21 @@ export async function POST(req: Request) {
     const db = getAdminClient()
 
     const jobSlug = formData.get('job_slug') as string
+    const firstName = formData.get('first_name') as string
+    const lastName = formData.get('last_name') as string
+    const email = formData.get('email') as string
+    const whyKorelabs = formData.get('why_korelabs') as string
+
+    const missing = []
+    if (!jobSlug) missing.push('job_slug')
+    if (!firstName) missing.push('first_name')
+    if (!lastName) missing.push('last_name')
+    if (!email || !email.includes('@')) missing.push('email')
+    if (!whyKorelabs) missing.push('why_korelabs')
+    if (missing.length > 0) {
+      return NextResponse.json({ error: `Missing or invalid fields: ${missing.join(', ')}` }, { status: 400 })
+    }
+
     const job = db
       ? await db.from('jobs').select('id, title').eq('slug', jobSlug).single().then((r) => r.data)
       : STATIC_JOBS.find((j) => j.slug === jobSlug)
@@ -35,15 +50,15 @@ export async function POST(req: Request) {
 
     const applicantData = {
       job_id: (job as { id: string }).id ?? null,
-      first_name: formData.get('first_name') as string,
-      last_name: formData.get('last_name') as string,
-      email: formData.get('email') as string,
+      first_name: firstName,
+      last_name: lastName,
+      email,
       phone: (formData.get('phone') as string) || null,
       location: (formData.get('location') as string) || null,
       linkedin_url: (formData.get('linkedin_url') as string) || null,
       github_url: (formData.get('github_url') as string) || null,
       portfolio_url: (formData.get('portfolio_url') as string) || null,
-      why_korelabs: formData.get('why_korelabs') as string,
+      why_korelabs: whyKorelabs,
       cv_path: cvPath,
     }
 
@@ -68,9 +83,8 @@ export async function POST(req: Request) {
       scheduled_for: scheduledFor.toISOString(),
     })
 
-    // Send acknowledgment email (fire-and-forget)
     const jobTitle = (job as { title: string }).title
-    sendAcknowledgmentEmail(applicant as unknown as Applicant, jobTitle).catch(console.error)
+    await sendAcknowledgmentEmail(applicant as unknown as Applicant, jobTitle)
 
     return NextResponse.json({ tracking_token: applicant.tracking_token }, { status: 201 })
   } catch (e) {

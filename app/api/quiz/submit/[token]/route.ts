@@ -12,7 +12,12 @@ export async function POST(req: Request, { params }: RouteContext) {
   if (!db) return NextResponse.json({ error: 'DB unavailable' }, { status: 503 })
 
   try {
-    const { answers } = await req.json()
+    const body = await req.json()
+    const { answers } = body
+
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
+      return NextResponse.json({ error: 'answers must be an object' }, { status: 400 })
+    }
 
     const { data: assessment } = await db
       .from('assessments')

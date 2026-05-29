@@ -27,7 +27,7 @@ export async function POST(req: Request) {
       if (error) throw error
     }
 
-    sendTalentPoolAcknowledgment(email, first_name, role_interest).catch(console.error)
+    await sendTalentPoolAcknowledgment(email, first_name, role_interest)
 
     return NextResponse.json({ ok: true }, { status: 201 })
   } catch (e) {

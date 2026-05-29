@@ -21,8 +21,8 @@ async function getApplicant(id: string) {
   const [{ data: applicant }, { data: assessment }, { data: interview }, { data: emails }] =
     await Promise.all([
       db.from('applicants').select('*, jobs(title, slug, department)').eq('id', id).single(),
-      db.from('assessments').select('*').eq('applicant_id', id).single(),
-      db.from('interviews').select('*, interview_slots(starts_at, duration_minutes)').eq('applicant_id', id).single(),
+      db.from('assessments').select('*').eq('applicant_id', id).maybeSingle(),
+      db.from('interviews').select('*, interview_slots(starts_at, duration_minutes)').eq('applicant_id', id).maybeSingle(),
       db.from('email_log').select('*').eq('applicant_id', id).order('sent_at', { ascending: false }),
     ])
 
