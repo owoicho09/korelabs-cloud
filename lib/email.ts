@@ -200,11 +200,20 @@ export async function sendInterviewConfirmationEmail(
   roleTitle: string
 ): Promise<void> {
   const resend = getResend()
-  const slotTime = interview.slot ? formatDateTime(interview.slot.starts_at) : 'TBD'
+
+  // Supabase returns joined slot data under the table name "interview_slots",
+  // not the "slot" alias defined in the Interview type.
+  const slotData =
+    interview.slot ??
+    (interview as unknown as { interview_slots?: { starts_at: string } | null }).interview_slots
+
+  const slotTime = slotData?.starts_at ? formatDateTime(slotData.starts_at) : 'TBD'
+
   const subject = `Interview confirmed — ${roleTitle} at KoreLabs`
   const zoomLink = interview.zoom_link ?? process.env.ZOOM_INTERVIEW_LINK ?? APP_URL
 
-  const body = `Your interview for the ${roleTitle} role at KoreLabs is confirmed for ${slotTime}. We will use the Zoom link below to connect. If anything changes, please reply to this email.`
+  // Include the Zoom URL inline so it is visible even if the button does not render.
+  const body = `Your interview for the ${roleTitle} role at KoreLabs is confirmed for ${slotTime}.\n\nJoin via Zoom: <a href="${zoomLink}" style="color:#4a9270;word-break:break-all;">${zoomLink}</a>\n\nIf anything changes, please reply to this email.`
 
   const html = buildEmailHtml(
     `See you then, ${applicant.first_name}`,
