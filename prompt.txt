@@ -1,0 +1,147 @@
+Build the complete company website for KoreLabs Cloud from scratch. Delete everything currently in this project and start fresh.
+
+---
+
+WHO THEY ARE
+
+KoreLabs Cloud is a Series A European AI infrastructure company (Amsterdam HQ, Berlin engineering hub, 47 people, €11M raised). They build KoreOS — an ambient workflow intelligence layer that sits across enterprise tools like Slack, Jira, Notion, HubSpot, and Microsoft 365, passively observing how organisations work and eliminating coordination waste. Their customers are mid-sized European enterprises (50–500 employees). This is not a tool. It is infrastructure.
+
+Their values: Ruthless Clarity. Builder Mentality. Trust by Default. European by Design. Radical Transparency.
+
+Their impact: KoreOS reduces coordination overhead by 30–40% in the first 90 days. 19–23% of productive organisational time is currently lost to coordination waste.
+
+---
+
+WHAT TO BUILD
+
+A complete, world-class company website with a fully functional hiring system built into it. Think of it like Linear's website meets Vercel's careers page — premium, confident, minimal, fast. European. Not American startup energy.
+
+The website is the primary thing. The careers and hiring system is a backend feature of it — important, fully functional, but it should not dominate the identity of the site.
+
+Tech stack: Next.js 14 App Router, TypeScript, Tailwind CSS, Framer Motion, Supabase (database + storage), Resend (email), OpenAI gpt-4o-mini (email personalisation), React Hook Form + Zod, Lucide React icons.
+
+---
+
+DESIGN DIRECTION
+
+Light theme. Clean. Confident. Premium. The kind of site where every pixel has a reason to be there.
+
+Brand color: a refined light green — use it as an accent, not wallpaper. Pair with near-white backgrounds, dark slate text, generous whitespace.
+
+Typography: choose fonts that feel European and editorial — not Inter, not Space Grotesk. Something with character. Pair a strong display font with a clean readable body font.
+
+The site should feel like the company behind it actually knows what they're doing. No generic SaaS template energy. No AI-generated feel. Every section should have one clear thing to say and say it well.
+
+Motion: subtle, purposeful. Scroll-triggered entry animations. Nothing that gets in the way.
+
+---
+
+PAGES
+
+Build every page a serious company website needs:
+
+- Home — hero, problem, product, how it works, integrations, impact, CTA
+- About — story, mission, values, team, locations
+- Product — KoreOS deep dive, capabilities, architecture, tech stack, security
+- Careers — job listings, talent pool waitlist
+- Individual job pages — full description, apply CTA
+- Contact
+- Public hiring stats page (/hiring) — live numbers from Supabase
+
+---
+
+CAREERS & HIRING SYSTEM
+
+This is a fully functional ATS built into the site. It runs automatically. No human needs to touch it for the pipeline to move.
+
+Roles to list (all full-time, remote Europe):
+1. Senior Backend Engineer — €85k–€115k
+2. Senior Frontend Engineer — €80k–€110k  
+3. AI/ML Engineer — €90k–€125k
+4. Cybersecurity Engineer — €85k–€115k
+5. DevOps / Infrastructure Engineer — €80k–€110k
+6. Product Designer — €70k–€95k
+7. Operations Analyst — €55k–€75k
+
+Write proper, compelling job descriptions for each. Not template JDs. The kind that make a senior engineer stop scrolling.
+
+APPLICATION FLOW:
+
+1. Applicant reads job page, clicks Apply
+2. Multi-step application form (name, contact, links, "why KoreLabs" 50–300 words, CV upload PDF)
+3. Submit → CV stored in Supabase Storage (private bucket: cvs/) → applicant record created in DB
+4. Immediate acknowledgment email via Resend — personalised using gpt-4o-mini with their name, role, and why-KoreLabs response. Warm, human, specific. Not generic.
+5. Applicant gets a tracking portal link (token-based, no login): /apply/track/[token] — shows their pipeline stage live
+6. At T+32 hours: assessment email sent — personalised, contains unique quiz link expiring in 48h
+7. Quiz: 20 MCQ questions, 30 minutes, role-specific, 3 tiers (fundamentals, applied judgment, KoreLabs context), max 36 points. No score shown to applicant. Everyone who completes it moves forward.
+8. 6–7 hours after quiz completion: interview invitation email — personalised, contains booking link
+9. Native interview slot booking (/interview/book/[token]) — applicant picks from available slots, gets Zoom link from .env, confirmation email sent
+10. Reminders at 24h and 1h before interview
+11. After interview: hiring manager marks outcome in admin dashboard. Pass → next steps email. No automated rejection emails — hiring manager handles communication.
+
+Talent pool: form on careers page — name, email, role interest, intro, CV upload. Stored separately. Acknowledgment email sent.
+
+EMAIL PERSONALISATION: Every single outgoing email uses gpt-4o-mini to personalise based on applicant data. Pass their name, role, why-KoreLabs answer, and any available context. The output should read like a human wrote it for that specific person.
+
+PIPELINE AUTOMATION: Use a pipeline_jobs queue table in Supabase. A cron endpoint (/api/cron/pipeline, secured, runs every 15 min via vercel.json) processes scheduled jobs. Handles all timed email sends automatically.
+
+---
+
+ADMIN DASHBOARD (/admin)
+
+Password protected (ADMIN_SECRET_KEY from env, HttpOnly cookie session).
+
+Build a proper internal hiring tool:
+- Overview: live metrics (applications, pipeline counts, interviews this week, hires)
+- Kanban pipeline: drag cards between stages (Received → Assessment Sent → Assessment Done → Interview Scheduled → Interviewed → Hired / On Hold)
+- Applications list: searchable, filterable, sortable
+- Individual applicant view: all their details, inline CV viewer (PDF iframe with signed Supabase URL), quiz score breakdown by tier, interview notes, decision buttons, full timeline
+- Jobs management: create, edit, pause roles
+- Interview slots: add available slots, see bookings
+- Talent pool viewer
+
+---
+
+DATABASE
+
+Use Supabase. Create supabase/schema.sql with the full schema ready to run:
+- jobs, applicants, assessments, quiz_questions, interviews, interview_slots, email_log, pipeline_jobs, talent_pool tables
+- Proper indexes, RLS policies, updated_at triggers
+- All foreign keys and constraints
+
+Create supabase/seed-jobs.sql with all 7 job records.
+Create supabase/seed-questions.sql with all 140 questions (20 per role, 3 tiers, 4-option MCQ with correct answer index and explanation).
+
+---
+
+ENVIRONMENT
+
+All secrets in .env.local. Create .env.example:
+
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+RESEND_API_KEY=
+EMAIL_FROM=careers@korelabs.cloud
+OPENAI_API_KEY=
+ZOOM_INTERVIEW_LINK=
+NEXT_PUBLIC_APP_URL=
+ADMIN_SECRET_KEY=
+CRON_SECRET=
+
+The app must load and render without env variables set. Supabase calls fail gracefully. No crashes on missing env.
+
+---
+
+QUALITY BAR
+
+- Fully responsive. Mobile is not an afterthought.
+- TypeScript throughout. No any types.
+- Every form has proper validation (Zod) with helpful error messages.
+- All API routes handle errors gracefully.
+- CV files accessed via signed URLs only. Never public.
+- The design must look like it was made by a designer who cares, not generated by a prompt.
+- The copy must sound like humans who are proud of what they're building, not a marketing bot.
+- The hiring system must actually work end to end.
+
+Build it. Make it something worth showing.
