@@ -85,7 +85,7 @@ export async function POST(req: Request) {
 
     const jobTitle = (job as { title: string }).title
     await sendAcknowledgmentEmail(applicant as unknown as Applicant, jobTitle)
-    void sendNewApplicantNotification(applicant as unknown as Applicant, jobTitle)
+    await sendNewApplicantNotification(applicant as unknown as Applicant, jobTitle)
 
     return NextResponse.json({ tracking_token: applicant.tracking_token }, { status: 201 })
   } catch (e) {

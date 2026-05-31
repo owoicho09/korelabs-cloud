@@ -331,13 +331,22 @@ export async function sendNewApplicantNotification(
     generateTrackingUrl(applicant.tracking_token)
   )
 
+  let resendId: string | undefined
+  let error: string | undefined
+
   if (resend) {
     try {
-      await resend.emails.send({ from: FROM, to: adminEmail, subject, html })
-    } catch { /* best effort */ }
+      const result = await resend.emails.send({ from: FROM, to: adminEmail, subject, html })
+      resendId = result.data?.id
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Unknown error'
+      console.error('[admin_notification] Resend error:', error)
+    }
+  } else {
+    console.warn('[admin_notification] Resend not configured — skipping send')
   }
 
-  await logEmail(applicant.id, adminEmail, subject, 'admin_notification')
+  await logEmail(applicant.id, adminEmail, subject, 'admin_notification', resendId, error)
 }
 
 export async function sendTalentPoolAcknowledgment(
