@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { sendAcknowledgmentEmail } from '@/lib/email'
+import { sendAcknowledgmentEmail, sendNewApplicantNotification } from '@/lib/email'
 import type { Applicant } from '@/lib/types'
 import { addHours } from 'date-fns'
 import { STATIC_JOBS } from '@/lib/jobs'
@@ -85,6 +85,7 @@ export async function POST(req: Request) {
 
     const jobTitle = (job as { title: string }).title
     await sendAcknowledgmentEmail(applicant as unknown as Applicant, jobTitle)
+    void sendNewApplicantNotification(applicant as unknown as Applicant, jobTitle)
 
     return NextResponse.json({ tracking_token: applicant.tracking_token }, { status: 201 })
   } catch (e) {

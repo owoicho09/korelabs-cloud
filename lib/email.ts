@@ -295,6 +295,51 @@ export async function sendReminderEmail(
   )
 }
 
+export async function sendNewApplicantNotification(
+  applicant: Applicant,
+  roleTitle: string
+): Promise<void> {
+  const adminEmail = process.env.ADMIN_NOTIFY_EMAIL
+  if (!adminEmail) return
+
+  const resend = getResend()
+  const subject = `New application — ${applicant.first_name} ${applicant.last_name} · ${roleTitle}`
+
+  const links = [
+    applicant.linkedin_url && `<a href="${applicant.linkedin_url}" style="color:#4a9270">LinkedIn</a>`,
+    applicant.github_url && `<a href="${applicant.github_url}" style="color:#4a9270">GitHub</a>`,
+    applicant.portfolio_url && `<a href="${applicant.portfolio_url}" style="color:#4a9270">Portfolio</a>`,
+  ].filter(Boolean).join(' · ')
+
+  const snippet = applicant.why_korelabs.length > 220
+    ? applicant.why_korelabs.slice(0, 220) + '…'
+    : applicant.why_korelabs
+
+  const body = [
+    `<strong>${applicant.first_name} ${applicant.last_name}</strong> just applied for the <strong>${roleTitle}</strong> role.`,
+    `<strong>Email:</strong> <a href="mailto:${applicant.email}" style="color:#4a9270">${applicant.email}</a>` +
+      (applicant.phone ? ` &nbsp;·&nbsp; <strong>Phone:</strong> ${applicant.phone}` : '') +
+      (applicant.location ? ` &nbsp;·&nbsp; <strong>Location:</strong> ${applicant.location}` : ''),
+    links ? `<strong>Links:</strong> ${links}` : '',
+    `<strong>Why KoreLabs:</strong> ${snippet}`,
+  ].filter(Boolean).join('\n')
+
+  const html = buildEmailHtml(
+    'New applicant',
+    body,
+    'View application',
+    generateTrackingUrl(applicant.tracking_token)
+  )
+
+  if (resend) {
+    try {
+      await resend.emails.send({ from: FROM, to: adminEmail, subject, html })
+    } catch { /* best effort */ }
+  }
+
+  await logEmail(applicant.id, adminEmail, subject, 'admin_notification')
+}
+
 export async function sendTalentPoolAcknowledgment(
   email: string,
   firstName: string,
