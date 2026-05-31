@@ -13,7 +13,11 @@
       "Bash(curl -s -o /dev/null -w \"/quiz/testtoken → %{http_code}\\\\n\" http://localhost:3000/quiz/testtoken)",
       "Bash(curl -s -o /dev/null -w \"/admin/login → %{http_code}\\\\n\" http://localhost:3000/admin/login)",
       "Bash(curl -s -o /dev/null -w \"/careers → %{http_code}\\\\n\" http://localhost:3000/careers)",
-      "Bash(curl -s -o /dev/null -w \"/api/test/pipeline → %{http_code}\\\\n\" -X POST http://localhost:3000/api/test/pipeline)"
+      "Bash(curl -s -o /dev/null -w \"/api/test/pipeline → %{http_code}\\\\n\" -X POST http://localhost:3000/api/test/pipeline)",
+      "Bash(npm run *)",
+      "Bash(git -C \"C:\\\\Users\\\\HP\\\\Desktop\\\\Projects\\\\korelabs-cloud\" status)",
+      "Bash(git -C \"C:\\\\Users\\\\HP\\\\Desktop\\\\Projects\\\\korelabs-cloud\" diff)",
+      "Bash(git *)"
     ]
   }
 }

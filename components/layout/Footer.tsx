@@ -5,7 +5,6 @@ const LINKS = {
     { href: '/product', label: 'KoreOS' },
     { href: '/product#security', label: 'Security' },
     { href: '/product#integrations', label: 'Integrations' },
-    { href: '/hiring', label: 'Hiring stats' },
   ],
   Company: [
     { href: '/about', label: 'About' },

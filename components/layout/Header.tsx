@@ -10,7 +10,6 @@ const NAV_LINKS = [
   { href: '/product', label: 'Product' },
   { href: '/about', label: 'About' },
   { href: '/careers', label: 'Careers' },
-  { href: '/hiring', label: 'Hiring stats' },
 ]
 
 export function Header() {
