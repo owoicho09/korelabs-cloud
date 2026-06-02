@@ -19,7 +19,8 @@
       "Bash(git -C \"C:\\\\Users\\\\HP\\\\Desktop\\\\Projects\\\\korelabs-cloud\" diff)",
       "Bash(git *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\HP\\\\Desktop\\\\Projects\\\\korelabs-cloud\" -Recurse -Depth 2)",
-      "Bash(Select-Object -First 50)"
+      "Bash(Select-Object -First 50)",
+      "Bash(npx tsc *)"
     ]
   }
 }

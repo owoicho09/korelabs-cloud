@@ -109,7 +109,8 @@ export async function sendAssessmentEmail(
   applicant: Applicant,
   roleTitle: string,
   quizToken: string,
-  expiresAt: Date
+  expiresAt: Date,
+  scheduledAt?: string
 ): Promise<void> {
   const resend = getResend()
   const subject = `Your KoreLabs assessment — ${roleTitle}`
@@ -142,6 +143,7 @@ export async function sendAssessmentEmail(
         to: applicant.email,
         subject,
         html,
+        ...(scheduledAt ? { scheduledAt } : {}),
       })
       resendId = result.data?.id
     } catch (e) {
@@ -155,7 +157,8 @@ export async function sendAssessmentEmail(
 export async function sendInterviewInviteEmail(
   applicant: Applicant,
   roleTitle: string,
-  bookingToken: string
+  bookingToken: string,
+  scheduledAt?: string
 ): Promise<void> {
   const resend = getResend()
   const subject = `Interview invitation — ${roleTitle} at KoreLabs`
@@ -184,6 +187,7 @@ export async function sendInterviewInviteEmail(
         to: applicant.email,
         subject,
         html,
+        ...(scheduledAt ? { scheduledAt } : {}),
       })
       resendId = result.data?.id
     } catch (e) {
@@ -246,7 +250,8 @@ export async function sendReminderEmail(
   applicant: Applicant,
   interview: Interview,
   roleTitle: string,
-  type: '24h' | '1h'
+  type: '24h' | '1h',
+  scheduledAt?: string
 ): Promise<void> {
   const resend = getResend()
   const subject = type === '24h'
@@ -278,6 +283,7 @@ export async function sendReminderEmail(
         to: applicant.email,
         subject,
         html,
+        ...(scheduledAt ? { scheduledAt } : {}),
       })
       resendId = result.data?.id
     } catch (e) {

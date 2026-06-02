@@ -7,6 +7,7 @@ import { formatDate, formatDateTime } from '@/lib/utils'
 import type { ApplicantStage } from '@/lib/types'
 import { PIPELINE_STAGES, STAGE_LABELS } from '@/lib/types'
 import { StageControls } from './StageControls'
+import { EmailTrigger } from './EmailTrigger'
 
 export const revalidate = 0
 
@@ -165,6 +166,7 @@ export default async function ApplicantPage({ params }: Props) {
         {/* Sidebar */}
         <div className="space-y-4">
           <StageControls applicantId={applicant.id} currentStage={applicant.stage as ApplicantStage} />
+          <EmailTrigger applicantId={applicant.id} />
 
           {interview && slot && (
             <div className="bg-white rounded-xl border border-[#D8E8E0] p-5">

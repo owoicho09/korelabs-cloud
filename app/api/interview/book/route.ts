@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { sendInterviewConfirmationEmail } from '@/lib/email'
-import { addHours } from 'date-fns'
+import { sendInterviewConfirmationEmail, sendReminderEmail } from '@/lib/email'
+import type { Applicant } from '@/lib/types'
 
 export async function POST(req: Request) {
   const db = getAdminClient()
@@ -45,32 +45,39 @@ export async function POST(req: Request) {
     await db.from('applicants').update({ stage: 'interview_scheduled' }).eq('id', interview.applicant_id)
 
     const jobTitle = (interview.applicants?.jobs as { title: string } | null)?.title ?? 'the role'
+    const applicant = interview.applicants as unknown as Applicant
 
+    // Send confirmation immediately
     await sendInterviewConfirmationEmail(
-      interview.applicants as Parameters<typeof sendInterviewConfirmationEmail>[0],
+      applicant,
       interview as Parameters<typeof sendInterviewConfirmationEmail>[1],
       jobTitle
     )
 
-    // Schedule reminder emails
+    // Schedule reminder emails via Resend's native scheduledAt — no cron needed.
     const slotTime = new Date(slot.starts_at)
-    const reminder24h = new Date(slotTime.getTime() - 24 * 60 * 60 * 1000)
-    const reminder1h = new Date(slotTime.getTime() - 60 * 60 * 1000)
+    const reminder24hAt = new Date(slotTime.getTime() - 24 * 60 * 60 * 1000)
+    const reminder1hAt = new Date(slotTime.getTime() - 60 * 60 * 1000)
+    const now = new Date()
 
-    if (reminder24h > new Date()) {
-      await db.from('pipeline_jobs').insert({
-        applicant_id: interview.applicant_id,
-        type: 'send_reminder_24h',
-        scheduled_for: reminder24h.toISOString(),
-      })
+    if (reminder24hAt > now) {
+      await sendReminderEmail(
+        applicant,
+        interview as Parameters<typeof sendReminderEmail>[1],
+        jobTitle,
+        '24h',
+        reminder24hAt.toISOString()
+      )
     }
 
-    if (reminder1h > new Date()) {
-      await db.from('pipeline_jobs').insert({
-        applicant_id: interview.applicant_id,
-        type: 'send_reminder_1h',
-        scheduled_for: reminder1h.toISOString(),
-      })
+    if (reminder1hAt > now) {
+      await sendReminderEmail(
+        applicant,
+        interview as Parameters<typeof sendReminderEmail>[1],
+        jobTitle,
+        '1h',
+        reminder1hAt.toISOString()
+      )
     }
 
     return NextResponse.json({ ok: true, interview })

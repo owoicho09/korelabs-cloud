@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { sendAcknowledgmentEmail, sendNewApplicantNotification } from '@/lib/email'
+import { sendAcknowledgmentEmail, sendAssessmentEmail, sendNewApplicantNotification } from '@/lib/email'
 import type { Applicant } from '@/lib/types'
 import { addHours } from 'date-fns'
 import { STATIC_JOBS } from '@/lib/jobs'
@@ -63,7 +63,6 @@ export async function POST(req: Request) {
     }
 
     if (!db) {
-      // Graceful degradation: return a mock token
       return NextResponse.json({ tracking_token: 'demo-token', message: 'DB not configured — demo mode' })
     }
 
@@ -75,17 +74,34 @@ export async function POST(req: Request) {
 
     if (insertError) throw insertError
 
-    // Schedule assessment email at T+32 hours
-    const scheduledFor = addHours(new Date(), 32)
-    await db.from('pipeline_jobs').insert({
-      applicant_id: applicant.id,
-      type: 'send_assessment',
-      scheduled_for: scheduledFor.toISOString(),
-    })
-
     const jobTitle = (job as { title: string }).title
+
+    // Send acknowledgment immediately
     await sendAcknowledgmentEmail(applicant as unknown as Applicant, jobTitle)
     await sendNewApplicantNotification(applicant as unknown as Applicant, jobTitle)
+
+    // Create the assessment record now so the quiz URL is ready, then schedule
+    // the email to arrive 32 hours from now via Resend's native scheduledAt.
+    const expiresAt = addHours(new Date(), 48)
+    const { data: assessment, error: assessmentError } = await db
+      .from('assessments')
+      .insert({ applicant_id: applicant.id, expires_at: expiresAt.toISOString() })
+      .select('quiz_token')
+      .single()
+
+    if (assessmentError || !assessment) {
+      console.error('[apply] Failed to create assessment:', assessmentError)
+    } else {
+      await db.from('applicants').update({ stage: 'assessment_sent' }).eq('id', applicant.id)
+      const scheduledAt = addHours(new Date(), 32).toISOString()
+      await sendAssessmentEmail(
+        applicant as unknown as Applicant,
+        jobTitle,
+        assessment.quiz_token,
+        expiresAt,
+        scheduledAt
+      )
+    }
 
     return NextResponse.json({ tracking_token: applicant.tracking_token }, { status: 201 })
   } catch (e) {

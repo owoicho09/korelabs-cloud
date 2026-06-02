@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
+import { sendInterviewInviteEmail } from '@/lib/email'
+import type { Applicant } from '@/lib/types'
 import { addHours } from 'date-fns'
 
 interface RouteContext {
@@ -71,13 +73,40 @@ export async function POST(req: Request, { params }: RouteContext) {
     if (applicantId) {
       await db.from('applicants').update({ stage: 'assessment_done' }).eq('id', applicantId)
 
-      // Schedule interview invite 6-7 hours later
-      const scheduledFor = addHours(new Date(), 6)
-      await db.from('pipeline_jobs').insert({
-        applicant_id: applicantId,
-        type: 'send_interview_invite',
-        scheduled_for: scheduledFor.toISOString(),
-      })
+      // Create the interview record now so the booking URL is ready, then schedule
+      // the invite email to arrive 6 hours from now via Resend's native scheduledAt.
+      const jobTitle = (assessment.applicants?.jobs as { title: string } | null)?.title ?? 'the role'
+
+      const { data: existing } = await db
+        .from('interviews')
+        .select('id, booking_token')
+        .eq('applicant_id', applicantId)
+        .maybeSingle()
+
+      let bookingToken: string
+
+      if (existing) {
+        bookingToken = existing.booking_token
+      } else {
+        const { data: interview, error: interviewError } = await db
+          .from('interviews')
+          .insert({ applicant_id: applicantId })
+          .select('booking_token')
+          .single()
+        if (interviewError || !interview) {
+          console.error('[quiz/submit] Failed to create interview:', interviewError)
+          return NextResponse.json({ ok: true })
+        }
+        bookingToken = interview.booking_token
+      }
+
+      const scheduledAt = addHours(new Date(), 6).toISOString()
+      await sendInterviewInviteEmail(
+        assessment.applicants as unknown as Applicant,
+        jobTitle,
+        bookingToken,
+        scheduledAt
+      )
     }
 
     return NextResponse.json({ ok: true })
