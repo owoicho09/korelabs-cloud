@@ -3,19 +3,20 @@ export type JobStatus = 'active' | 'paused' | 'closed'
 export type ApplicantStage =
   | 'received'
   | 'assessment_sent'
-  | 'assessment_done'
-  | 'interview_scheduled'
-  | 'interviewed'
-  | 'hired'
+  | 'assessment_video_done'
+  | 'under_review'
+  | 'accepted'
   | 'on_hold'
+  | 'archived'
 
+export type QuestionTier = 'fundamentals' | 'applied' | 'korelabs'
+
+// Kept for backward compat with existing DB tables
 export type PipelineJobType =
   | 'send_assessment'
   | 'send_interview_invite'
   | 'send_reminder_24h'
   | 'send_reminder_1h'
-
-export type QuestionTier = 'fundamentals' | 'applied' | 'korelabs'
 
 export interface Job {
   id: string
@@ -51,6 +52,10 @@ export interface Applicant {
   cv_path: string | null
   stage: ApplicantStage
   notes: string | null
+  nudge1_resend_id: string | null
+  nudge2_resend_id: string | null
+  video_reminder_resend_id: string | null
+  stage_updated_at: string | null
   created_at: string
   updated_at: string
   job?: Job
@@ -81,6 +86,23 @@ export interface QuizQuestion {
   explanation: string
   points: number
   order_index: number
+  created_at: string
+}
+
+export interface VideoQuestion {
+  id: string
+  department: string
+  question: string
+  order_index: number
+  max_seconds: number
+}
+
+export interface Video {
+  id: string
+  applicant_id: string
+  question_index: number
+  storage_path: string
+  duration_seconds: number | null
   created_at: string
 }
 
@@ -168,7 +190,6 @@ export interface TalentPoolFormData {
 export interface AdminStats {
   total_applications: number
   applications_this_week: number
-  interviews_this_week: number
   stage_counts: Record<ApplicantStage, number>
   applications_by_role: Array<{ title: string; count: number }>
 }
@@ -176,19 +197,19 @@ export interface AdminStats {
 export const STAGE_LABELS: Record<ApplicantStage, string> = {
   received: 'Received',
   assessment_sent: 'Assessment Sent',
-  assessment_done: 'Assessment Done',
-  interview_scheduled: 'Interview Scheduled',
-  interviewed: 'Interviewed',
-  hired: 'Hired',
+  assessment_video_done: 'Video Done',
+  under_review: 'Under Review',
+  accepted: 'Accepted',
   on_hold: 'On Hold',
+  archived: 'Archived',
 }
 
 export const PIPELINE_STAGES: ApplicantStage[] = [
   'received',
   'assessment_sent',
-  'assessment_done',
-  'interview_scheduled',
-  'interviewed',
-  'hired',
+  'assessment_video_done',
+  'under_review',
+  'accepted',
   'on_hold',
+  'archived',
 ]

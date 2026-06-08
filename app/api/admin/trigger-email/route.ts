@@ -3,16 +3,17 @@ import { getAdminClient } from '@/lib/supabase/admin'
 import { isAdminAuthenticated } from '@/lib/auth'
 import {
   sendAssessmentEmail,
-  sendInterviewInviteEmail,
-  sendReminderEmail,
+  sendNudge1Email,
+  sendNudge2Email,
+  sendVideoReminderEmail,
 } from '@/lib/email'
-import type { Applicant, Interview, PipelineJobType } from '@/lib/types'
-import { addHours } from 'date-fns'
+import type { Applicant } from '@/lib/types'
+import { addDays } from 'date-fns'
 import { z } from 'zod'
 
 const bodySchema = z.object({
   applicant_id: z.string().uuid(),
-  type: z.enum(['send_assessment', 'send_interview_invite', 'send_reminder_24h', 'send_reminder_1h']),
+  type: z.enum(['send_assessment', 'nudge_1', 'nudge_2', 'video_reminder']),
 })
 
 export async function POST(req: Request) {
@@ -56,10 +57,10 @@ export async function POST(req: Request) {
 
       if (existing) {
         token = existing.quiz_token
-        expiresAt = addHours(new Date(), 48)
+        expiresAt = addDays(new Date(), 7)
         await db.from('assessments').update({ expires_at: expiresAt.toISOString() }).eq('id', existing.id)
       } else {
-        expiresAt = addHours(new Date(), 48)
+        expiresAt = addDays(new Date(), 7)
         const { data: assessment, error } = await db
           .from('assessments')
           .insert({ applicant_id, expires_at: expiresAt.toISOString() })
@@ -69,57 +70,47 @@ export async function POST(req: Request) {
         token = assessment.quiz_token
       }
 
-      await db.from('applicants').update({ stage: 'assessment_sent' }).eq('id', applicant_id)
-      // No scheduledAt — send immediately for testing
+      await db.from('applicants').update({ stage: 'assessment_sent', stage_updated_at: new Date().toISOString() }).eq('id', applicant_id)
       await sendAssessmentEmail(applicant as unknown as Applicant, jobTitle, token, expiresAt)
       return NextResponse.json({ ok: true, detail: `Assessment email sent immediately. Quiz token: ${token}` })
     }
 
-    if (type === 'send_interview_invite') {
-      const { data: existing } = await db
-        .from('interviews')
-        .select('id, booking_token')
+    if (type === 'nudge_1' || type === 'nudge_2') {
+      const { data: assessment } = await db
+        .from('assessments')
+        .select('quiz_token')
         .eq('applicant_id', applicant_id)
+        .is('completed_at', null)
         .maybeSingle()
 
-      let bookingToken: string
-
-      if (existing) {
-        bookingToken = existing.booking_token
-      } else {
-        const { data: interview, error } = await db
-          .from('interviews')
-          .insert({ applicant_id })
-          .select()
-          .single()
-        if (error || !interview) throw new Error('Failed to create interview record')
-        bookingToken = interview.booking_token
+      if (!assessment) {
+        return NextResponse.json({ error: 'No pending assessment found' }, { status: 422 })
       }
 
-      await sendInterviewInviteEmail(applicant as unknown as Applicant, jobTitle, bookingToken)
-      return NextResponse.json({ ok: true, detail: `Interview invite sent immediately. Booking token: ${bookingToken}` })
+      const nowIso = new Date().toISOString()
+      if (type === 'nudge_1') {
+        await sendNudge1Email(applicant as unknown as Applicant, jobTitle, assessment.quiz_token, nowIso)
+      } else {
+        await sendNudge2Email(applicant as unknown as Applicant, jobTitle, assessment.quiz_token, nowIso)
+      }
+      return NextResponse.json({ ok: true, detail: `${type} sent immediately` })
     }
 
-    if (type === 'send_reminder_24h' || type === 'send_reminder_1h') {
-      const { data: interview } = await db
-        .from('interviews')
-        .select('*, interview_slots(*)')
+    if (type === 'video_reminder') {
+      const { data: assessment } = await db
+        .from('assessments')
+        .select('quiz_token')
         .eq('applicant_id', applicant_id)
-        .eq('status', 'booked')
-        .single()
+        .not('completed_at', 'is', null)
+        .maybeSingle()
 
-      if (!interview) {
-        return NextResponse.json({ error: 'No booked interview found for this applicant' }, { status: 422 })
+      if (!assessment) {
+        return NextResponse.json({ error: 'No completed assessment found' }, { status: 422 })
       }
 
-      const label = type === 'send_reminder_24h' ? '24h' : '1h'
-      await sendReminderEmail(
-        applicant as unknown as Applicant,
-        interview as unknown as Interview,
-        jobTitle,
-        label
-      )
-      return NextResponse.json({ ok: true, detail: `${label} reminder sent immediately` })
+      const nowIso = new Date().toISOString()
+      await sendVideoReminderEmail(applicant as unknown as Applicant, jobTitle, assessment.quiz_token, nowIso)
+      return NextResponse.json({ ok: true, detail: 'Video reminder sent immediately' })
     }
   } catch (e) {
     console.error('[trigger-email]', e)

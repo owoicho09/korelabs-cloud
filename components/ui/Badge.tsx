@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import type { ApplicantStage } from '@/lib/types'
 
-type BadgeVariant = 'default' | 'brand' | 'success' | 'warning' | 'danger' | 'muted'
+type BadgeVariant = 'default' | 'brand' | 'success' | 'warning' | 'danger' | 'muted' | 'purple'
 
 interface BadgeProps {
   children: React.ReactNode
@@ -16,6 +16,7 @@ const variantClasses: Record<BadgeVariant, string> = {
   warning: 'bg-amber-50 text-amber-700',
   danger: 'bg-red-50 text-red-600',
   muted: 'bg-[#F4F7F5] text-[#637A6F]',
+  purple: 'bg-purple-50 text-purple-700',
 }
 
 export function Badge({ children, variant = 'default', className }: BadgeProps) {
@@ -35,21 +36,21 @@ export function Badge({ children, variant = 'default', className }: BadgeProps) 
 const stageVariantMap: Record<ApplicantStage, BadgeVariant> = {
   received: 'muted',
   assessment_sent: 'default',
-  assessment_done: 'success',
-  interview_scheduled: 'brand',
-  interviewed: 'brand',
-  hired: 'success',
+  assessment_video_done: 'success',
+  under_review: 'brand',
+  accepted: 'purple',
   on_hold: 'warning',
+  archived: 'danger',
 }
 
 const stageLabels: Record<ApplicantStage, string> = {
   received: 'Received',
   assessment_sent: 'Assessment Sent',
-  assessment_done: 'Assessment Done',
-  interview_scheduled: 'Interview Scheduled',
-  interviewed: 'Interviewed',
-  hired: 'Hired',
+  assessment_video_done: 'Video Done',
+  under_review: 'Under Review',
+  accepted: 'Accepted',
   on_hold: 'On Hold',
+  archived: 'Archived',
 }
 
 export function StageBadge({ stage }: { stage: ApplicantStage }) {
@@ -58,4 +59,10 @@ export function StageBadge({ stage }: { stage: ApplicantStage }) {
       {stageLabels[stage]}
     </Badge>
   )
+}
+
+export function ScoreBadge({ score }: { score: number | null }) {
+  if (score === null) return <span className="text-xs text-[#9FB5A9]">—</span>
+  const variant: BadgeVariant = score >= 30 ? 'success' : score >= 20 ? 'warning' : 'danger'
+  return <Badge variant={variant}>{score}/36</Badge>
 }

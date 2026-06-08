@@ -51,11 +51,11 @@ export default async function HiringPage() {
   const ORDERED_STAGES: ApplicantStage[] = [
     'received',
     'assessment_sent',
-    'assessment_done',
-    'interview_scheduled',
-    'interviewed',
-    'hired',
+    'assessment_video_done',
+    'under_review',
+    'accepted',
     'on_hold',
+    'archived',
   ]
 
   return (
@@ -88,8 +88,8 @@ export default async function HiringPage() {
               {[
                 { label: 'Total applications', value: total.toString() },
                 { label: 'Open roles', value: openRoles.toString() },
-                { label: 'Hired this cycle', value: (stages['hired'] ?? 0).toString() },
-                { label: 'Active in pipeline', value: (total - (stages['hired'] ?? 0) - (stages['on_hold'] ?? 0)).toString() },
+                { label: 'Accepted this cycle', value: (stages['accepted'] ?? 0).toString() },
+                { label: 'Active in pipeline', value: (total - (stages['accepted'] ?? 0) - (stages['on_hold'] ?? 0) - (stages['archived'] ?? 0)).toString() },
               ].map(({ label, value }) => (
                 <div key={label} className="p-5 rounded-2xl bg-white border border-[#D8E8E0]">
                   <div className="font-display text-[32px] text-brand font-semibold">{value}</div>

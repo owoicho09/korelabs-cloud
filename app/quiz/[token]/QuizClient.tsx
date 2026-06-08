@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle, Video } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import Link from 'next/link'
 
 interface Question {
   id: string
@@ -57,7 +58,6 @@ export function QuizClient({ token, questions, firstName, jobTitle }: Props) {
       })
       setSubmitted(true)
     } catch {
-      // Best effort
       setSubmitted(true)
     } finally {
       setSubmitting(false)
@@ -128,9 +128,17 @@ export function QuizClient({ token, questions, firstName, jobTitle }: Props) {
             <CheckCircle size={32} className="text-brand" />
           </div>
           <h2 className="font-display text-2xl text-[#1A2A1E] mb-3">Assessment submitted.</h2>
-          <p className="text-[#637A6F]">
-            Our team will review your responses and you will hear from us within a few days.
+          <p className="text-[#637A6F] mb-8">
+            One more step — record a short video introduction so the hiring team can get to know you.
           </p>
+          <Link
+            href={`/video/${token}`}
+            className="inline-flex items-center gap-2 bg-brand text-white px-6 py-3 rounded-xl font-medium hover:bg-brand/90 transition-colors"
+          >
+            <Video size={18} />
+            Record my video
+          </Link>
+          <p className="text-xs text-[#9FB5A9] mt-4">Takes about 5 minutes · 3 questions · 90 seconds each</p>
         </div>
       </div>
     )

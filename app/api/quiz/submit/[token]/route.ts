@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { sendInterviewInviteEmail } from '@/lib/email'
+import { cancelScheduledEmail, sendVideoReminderEmail } from '@/lib/email'
 import type { Applicant } from '@/lib/types'
 import { addHours } from 'date-fns'
 
@@ -23,7 +23,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     const { data: assessment } = await db
       .from('assessments')
-      .select('*, applicants(id, first_name, last_name, email, why_korelabs, job_id, jobs(slug, title))')
+      .select('*, applicants(id, first_name, last_name, email, why_korelabs, job_id, nudge1_resend_id, nudge2_resend_id, jobs(slug, title))')
       .eq('quiz_token', token)
       .single()
 
@@ -36,13 +36,11 @@ export async function POST(req: Request, { params }: RouteContext) {
     const jobSlug = (assessment.applicants?.jobs as { slug: string } | null)?.slug
     if (!jobSlug) return NextResponse.json({ error: 'Job not found' }, { status: 400 })
 
-    // Fetch questions with correct answers
     const { data: questions } = await db
       .from('quiz_questions')
       .select('id, tier, correct_index, points')
       .eq('job_slug', jobSlug)
 
-    // Calculate scores
     let scoreFundamentals = 0
     let scoreApplied = 0
     let scoreKorelabs = 0
@@ -58,7 +56,6 @@ export async function POST(req: Request, { params }: RouteContext) {
 
     const totalScore = scoreFundamentals + scoreApplied + scoreKorelabs
 
-    // Update assessment
     await db.from('assessments').update({
       answers,
       score: totalScore,
@@ -68,48 +65,37 @@ export async function POST(req: Request, { params }: RouteContext) {
       completed_at: new Date().toISOString(),
     }).eq('id', assessment.id)
 
-    // Update applicant stage
-    const applicantId = assessment.applicants?.id
+    const applicantData = assessment.applicants
+    const applicantId = applicantData?.id
+
     if (applicantId) {
-      await db.from('applicants').update({ stage: 'assessment_done' }).eq('id', applicantId)
+      // Cancel nudge emails — applicant completed the quiz so nudges are no longer needed
+      const nudge1Id = (applicantData as { nudge1_resend_id?: string | null }).nudge1_resend_id
+      const nudge2Id = (applicantData as { nudge2_resend_id?: string | null }).nudge2_resend_id
 
-      // Create the interview record now so the booking URL is ready, then schedule
-      // the invite email to arrive 6 hours from now via Resend's native scheduledAt.
+      if (nudge1Id) await cancelScheduledEmail(nudge1Id)
+      if (nudge2Id) await cancelScheduledEmail(nudge2Id)
+
+      // Schedule video reminder for 24h from now if no video submitted yet
       const jobTitle = (assessment.applicants?.jobs as { title: string } | null)?.title ?? 'the role'
+      const videoReminderAt = addHours(new Date(), 24).toISOString()
 
-      const { data: existing } = await db
-        .from('interviews')
-        .select('id, booking_token')
-        .eq('applicant_id', applicantId)
-        .maybeSingle()
-
-      let bookingToken: string
-
-      if (existing) {
-        bookingToken = existing.booking_token
-      } else {
-        const { data: interview, error: interviewError } = await db
-          .from('interviews')
-          .insert({ applicant_id: applicantId })
-          .select('booking_token')
-          .single()
-        if (interviewError || !interview) {
-          console.error('[quiz/submit] Failed to create interview:', interviewError)
-          return NextResponse.json({ ok: true })
-        }
-        bookingToken = interview.booking_token
-      }
-
-      const scheduledAt = addHours(new Date(), 6).toISOString()
-      await sendInterviewInviteEmail(
-        assessment.applicants as unknown as Applicant,
+      const videoReminderId = await sendVideoReminderEmail(
+        applicantData as unknown as Applicant,
         jobTitle,
-        bookingToken,
-        scheduledAt
+        token,
+        videoReminderAt
       )
+
+      // Persist cancellation of nudges and new video reminder ID
+      await db.from('applicants').update({
+        nudge1_resend_id: null,
+        nudge2_resend_id: null,
+        video_reminder_resend_id: videoReminderId ?? null,
+      }).eq('id', applicantId)
     }
 
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, quiz_token: token })
   } catch (e) {
     console.error('Quiz submit error:', e)
     return NextResponse.json({ error: 'Submission failed' }, { status: 500 })

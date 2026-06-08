@@ -3,18 +3,12 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
-import type { PipelineJobType } from '@/lib/types'
 
-interface EmailAction {
-  type: PipelineJobType
-  label: string
-}
-
-const EMAIL_ACTIONS: EmailAction[] = [
+const EMAIL_ACTIONS = [
   { type: 'send_assessment', label: 'Assessment email' },
-  { type: 'send_interview_invite', label: 'Interview invite' },
-  { type: 'send_reminder_24h', label: '24h reminder' },
-  { type: 'send_reminder_1h', label: '1h reminder' },
+  { type: 'nudge_1', label: 'Nudge 1 (48h reminder)' },
+  { type: 'nudge_2', label: 'Nudge 2 (5-day final)' },
+  { type: 'video_reminder', label: 'Video reminder' },
 ]
 
 interface Props {
@@ -23,10 +17,10 @@ interface Props {
 
 export function EmailTrigger({ applicantId }: Props) {
   const router = useRouter()
-  const [busy, setBusy] = useState<PipelineJobType | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
-  async function trigger(type: PipelineJobType) {
+  async function trigger(type: string) {
     setBusy(type)
     setResult(null)
     try {

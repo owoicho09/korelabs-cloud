@@ -1,77 +1,99 @@
 import { getAdminClient } from '@/lib/supabase/admin'
-import Link from 'next/link'
-import { StageBadge } from '@/components/ui/Badge'
-import { formatRelative } from '@/lib/utils'
 import type { ApplicantStage } from '@/lib/types'
+import { PIPELINE_STAGES, STAGE_LABELS } from '@/lib/types'
+import { ApplicationsTable } from './ApplicationsTable'
 
 export const revalidate = 0
 
-async function getApplications() {
+interface SearchParams {
+  stage?: string
+  search?: string
+  sort?: string
+  page?: string
+  score_min?: string
+  score_max?: string
+  [key: string]: string | undefined
+}
+
+async function getApplications(params: SearchParams) {
   const db = getAdminClient()
   if (!db) return []
 
-  const { data } = await db
+  let query = db
     .from('applicants')
-    .select('id, first_name, last_name, email, stage, created_at, jobs(title, department)')
-    .order('created_at', { ascending: false })
+    .select(`
+      id, first_name, last_name, email, stage, created_at, updated_at, location,
+      jobs(title, department),
+      assessments(score, completed_at)
+    `)
 
-  return data ?? []
+  if (params.stage && PIPELINE_STAGES.includes(params.stage as ApplicantStage)) {
+    query = query.eq('stage', params.stage)
+  }
+
+  if (params.search) {
+    const q = params.search
+    query = query.or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`)
+  }
+
+  const sort = params.sort ?? 'date_desc'
+  if (sort === 'date_desc') query = query.order('created_at', { ascending: false })
+  else if (sort === 'date_asc') query = query.order('created_at', { ascending: true })
+  else if (sort === 'name_asc') query = query.order('first_name', { ascending: true })
+  else if (sort === 'stage') query = query.order('stage', { ascending: true })
+  else query = query.order('created_at', { ascending: false })
+
+  const { data } = await query
+
+  let rows = (data ?? []).map((a) => {
+    const assessment = (a.assessments as unknown as { score: number | null; completed_at: string | null }[] | null)?.[0] ?? null
+    const jobData = (Array.isArray(a.jobs) ? a.jobs[0] : a.jobs) as { title: string; department: string } | null
+    return { ...a, jobs: jobData, score: assessment?.score ?? null, assessment_completed: !!assessment?.completed_at }
+  })
+
+  // Score filtering (done in JS since it's a joined field)
+  const scoreMin = params.score_min ? parseInt(params.score_min) : null
+  const scoreMax = params.score_max ? parseInt(params.score_max) : null
+  if (scoreMin !== null) rows = rows.filter((r) => r.score !== null && r.score >= scoreMin)
+  if (scoreMax !== null) rows = rows.filter((r) => r.score !== null && r.score <= scoreMax)
+
+  // Score sort (done in JS)
+  if (sort === 'score_desc') rows = rows.sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+  if (sort === 'score_asc') rows = rows.sort((a, b) => (a.score ?? -1) - (b.score ?? -1))
+
+  return rows
 }
 
-export default async function ApplicationsPage() {
-  const applications = await getApplications()
+interface Props {
+  searchParams: Promise<SearchParams>
+}
+
+export default async function ApplicationsPage({ searchParams }: Props) {
+  const params = await searchParams
+  const applications = await getApplications(params)
+
+  const page = parseInt(params.page ?? '1')
+  const perPage = 50
+  const totalPages = Math.ceil(applications.length / perPage)
+  const paged = applications.slice((page - 1) * perPage, page * perPage)
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl text-[#1A2A1E]">Applications</h1>
           <p className="text-sm text-[#637A6F] mt-1">{applications.length} total</p>
         </div>
       </div>
 
-      {applications.length === 0 ? (
-        <div className="bg-white rounded-xl border border-[#D8E8E0] p-8 text-center">
-          <p className="text-[#9FB5A9]">No applications yet.</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-xl border border-[#D8E8E0] overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-[#F4F7F5] border-b border-[#D8E8E0]">
-              <tr>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[#637A6F] uppercase tracking-wide">Name</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[#637A6F] uppercase tracking-wide hidden md:table-cell">Role</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[#637A6F] uppercase tracking-wide">Stage</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[#637A6F] uppercase tracking-wide hidden lg:table-cell">Applied</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#F0F7F3]">
-              {applications.map((a) => (
-                <tr key={a.id} className="hover:bg-[#F8FBF9] transition-colors">
-                  <td className="px-5 py-3.5">
-                    <Link href={`/admin/applications/${a.id}`} className="hover:text-brand transition-colors">
-                      <span className="font-medium text-[#1A2A1E]">{a.first_name} {a.last_name}</span>
-                      <br />
-                      <span className="text-xs text-[#9FB5A9]">{a.email}</span>
-                    </Link>
-                  </td>
-                  <td className="px-5 py-3.5 hidden md:table-cell">
-                    <span className="text-[#637A6F]">
-                      {(a.jobs as unknown as { title: string } | null)?.title ?? '—'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <StageBadge stage={a.stage as ApplicantStage} />
-                  </td>
-                  <td className="px-5 py-3.5 hidden lg:table-cell text-[#9FB5A9]">
-                    {formatRelative(a.created_at)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <ApplicationsTable
+        applications={paged}
+        totalCount={applications.length}
+        currentPage={page}
+        totalPages={totalPages}
+        currentParams={params}
+        stageOptions={PIPELINE_STAGES.map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
+      />
     </div>
   )
 }

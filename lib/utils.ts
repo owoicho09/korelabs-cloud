@@ -60,6 +60,15 @@ export function generateBookingUrl(token: string): string {
   return `${base}/interview/book/${token}`
 }
 
+export function generateVideoUrl(token: string): string {
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  return `${base}/video/${token}`
+}
+
+export function daysAgo(date: string | Date): number {
+  return Math.floor((Date.now() - new Date(date).getTime()) / 86_400_000)
+}
+
 export function truncate(str: string, length: number): string {
   if (str.length <= length) return str
   return str.slice(0, length).trimEnd() + '…'

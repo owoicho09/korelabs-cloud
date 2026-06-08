@@ -1,12 +1,12 @@
 import Link from 'next/link'
-import { LayoutDashboard, Users, Columns, Briefcase, Calendar, UserSearch, LogOut } from 'lucide-react'
+import { LayoutDashboard, Users, Columns, Briefcase, UserSearch, LogOut } from 'lucide-react'
+import { AdminSearchBar } from './AdminSearchBar'
 
 const NAV = [
-  { href: '/admin', label: 'Overview', icon: LayoutDashboard, exact: true },
+  { href: '/admin', label: 'Overview', icon: LayoutDashboard },
   { href: '/admin/pipeline', label: 'Pipeline', icon: Columns },
   { href: '/admin/applications', label: 'Applications', icon: Users },
   { href: '/admin/jobs', label: 'Jobs', icon: Briefcase },
-  { href: '/admin/slots', label: 'Interview slots', icon: Calendar },
   { href: '/admin/talent', label: 'Talent pool', icon: UserSearch },
 ]
 
@@ -16,7 +16,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Sidebar */}
       <aside className="w-56 bg-[#1A2A1E] flex flex-col flex-shrink-0">
         <div className="p-5 border-b border-white/10">
-          <Link href="/admin" className="flex items-center gap-2">
+          <Link href="/admin" className="flex items-center gap-2 mb-4">
             <span className="w-6 h-6 rounded-md bg-brand flex items-center justify-center">
               <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
                 <circle cx="4" cy="4" r="2.5" fill="white" opacity="0.9" />
@@ -27,6 +27,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </span>
             <span className="font-display text-sm font-semibold text-white">Admin</span>
           </Link>
+          <AdminSearchBar />
         </div>
 
         <nav className="flex-1 p-3 overflow-y-auto">

@@ -20,7 +20,9 @@
       "Bash(git *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\HP\\\\Desktop\\\\Projects\\\\korelabs-cloud\" -Recurse -Depth 2)",
       "Bash(Select-Object -First 50)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\HP\\\\Desktop\\\\Projects\\\\korelabs-cloud\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

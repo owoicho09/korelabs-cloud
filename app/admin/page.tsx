@@ -1,9 +1,10 @@
 import { getAdminClient } from '@/lib/supabase/admin'
 import { STAGE_LABELS, type ApplicantStage } from '@/lib/types'
-import { formatRelative } from '@/lib/utils'
+import { formatRelative, daysAgo } from '@/lib/utils'
 import Link from 'next/link'
 import { StageBadge } from '@/components/ui/Badge'
 import { startOfWeek } from 'date-fns'
+import { AlertTriangle, Clock, CheckCircle, TrendingUp } from 'lucide-react'
 
 export const revalidate = 0
 
@@ -18,27 +19,59 @@ async function getDashboardData() {
     { count: thisWeek },
     { data: byStageFull },
     { data: recent },
-    { count: interviewsThisWeek },
+    { count: accepted },
+    { data: stuckAssessment },
+    { data: awaitingReview },
   ] = await Promise.all([
     db.from('applicants').select('*', { count: 'exact', head: true }),
     db.from('applicants').select('*', { count: 'exact', head: true }).gte('created_at', weekStart),
-    db.from('applicants').select('stage'),
+    db.from('applicants').select('stage, updated_at'),
     db.from('applicants').select('id, first_name, last_name, stage, created_at, jobs(title)').order('created_at', { ascending: false }).limit(8),
-    db.from('interviews').select('*', { count: 'exact', head: true }).eq('status', 'booked').gte('booked_at', weekStart),
+    db.from('applicants').select('*', { count: 'exact', head: true }).eq('stage', 'accepted').gte('updated_at', weekStart),
+    // Stuck at assessment_sent for >5 days
+    db.from('applicants')
+      .select('id, first_name, last_name, email, updated_at, jobs(title)')
+      .eq('stage', 'assessment_sent')
+      .lt('updated_at', new Date(Date.now() - 5 * 86400000).toISOString())
+      .order('updated_at')
+      .limit(10),
+    // At assessment_video_done awaiting review
+    db.from('applicants')
+      .select('id, first_name, last_name, updated_at, jobs(title)')
+      .eq('stage', 'assessment_video_done')
+      .order('updated_at')
+      .limit(10),
   ])
 
   const stageCounts: Record<string, number> = {}
+  const stageTimeTotals: Record<string, number> = {}
+  const stageTimeCounts: Record<string, number> = {}
   for (const a of byStageFull ?? []) {
     stageCounts[a.stage] = (stageCounts[a.stage] ?? 0) + 1
+    const days = daysAgo(a.updated_at)
+    stageTimeTotals[a.stage] = (stageTimeTotals[a.stage] ?? 0) + days
+    stageTimeCounts[a.stage] = (stageTimeCounts[a.stage] ?? 0) + 1
   }
 
-  return { total: total ?? 0, thisWeek: thisWeek ?? 0, interviewsThisWeek: interviewsThisWeek ?? 0, stageCounts, recent: recent ?? [] }
+  return {
+    total: total ?? 0,
+    thisWeek: thisWeek ?? 0,
+    accepted: accepted ?? 0,
+    stageCounts,
+    stageTimeTotals,
+    stageTimeCounts,
+    recent: recent ?? [],
+    stuckAssessment: stuckAssessment ?? [],
+    awaitingReview: awaitingReview ?? [],
+  }
 }
+
+const ORDERED_STAGES: ApplicantStage[] = [
+  'received', 'assessment_sent', 'assessment_video_done', 'under_review', 'accepted', 'on_hold', 'archived',
+]
 
 export default async function AdminOverview() {
   const data = await getDashboardData()
-
-  const ORDERED_STAGES: ApplicantStage[] = ['received', 'assessment_sent', 'assessment_done', 'interview_scheduled', 'interviewed', 'hired', 'on_hold']
 
   return (
     <div className="p-8">
@@ -58,8 +91,8 @@ export default async function AdminOverview() {
             {[
               { label: 'Total applications', value: data.total },
               { label: 'This week', value: data.thisWeek },
-              { label: 'Interviews this week', value: data.interviewsThisWeek },
-              { label: 'Hired', value: data.stageCounts['hired'] ?? 0 },
+              { label: 'Accepted this week', value: data.accepted },
+              { label: 'Awaiting video review', value: data.stageCounts['assessment_video_done'] ?? 0 },
             ].map(({ label, value }) => (
               <div key={label} className="p-5 rounded-xl bg-white border border-[#D8E8E0]">
                 <div className="font-display text-3xl text-brand font-semibold">{value}</div>
@@ -68,17 +101,78 @@ export default async function AdminOverview() {
             ))}
           </div>
 
+          {/* Pipeline Intelligence Panel */}
+          {(data.stuckAssessment.length > 0 || data.awaitingReview.length > 0) && (
+            <div className="mb-6 grid lg:grid-cols-2 gap-4">
+              {data.stuckAssessment.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <AlertTriangle size={16} className="text-amber-600" />
+                    <h2 className="font-medium text-amber-900 text-sm">Stuck in assessment ({data.stuckAssessment.length})</h2>
+                    <span className="text-xs text-amber-600 ml-auto">&gt;5 days</span>
+                  </div>
+                  <div className="space-y-2">
+                    {data.stuckAssessment.slice(0, 5).map((a) => (
+                      <Link key={a.id} href={`/admin/applications/${a.id}`} className="flex items-center justify-between hover:opacity-80">
+                        <div>
+                          <p className="text-sm font-medium text-amber-900">{a.first_name} {a.last_name}</p>
+                          <p className="text-xs text-amber-700">{(a.jobs as unknown as { title: string } | null)?.title}</p>
+                        </div>
+                        <span className="text-xs text-amber-600">{daysAgo(a.updated_at)}d</span>
+                      </Link>
+                    ))}
+                  </div>
+                  <Link href="/admin/applications?stage=assessment_sent" className="text-xs text-amber-700 hover:underline mt-3 block">
+                    View all stuck →
+                  </Link>
+                </div>
+              )}
+
+              {data.awaitingReview.length > 0 && (
+                <div className="bg-white border border-[#D8E8E0] rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Clock size={16} className="text-brand" />
+                    <h2 className="font-medium text-[#1A2A1E] text-sm">Awaiting review ({data.awaitingReview.length})</h2>
+                    <span className="text-xs text-[#637A6F] ml-auto">Video done</span>
+                  </div>
+                  <div className="space-y-2">
+                    {data.awaitingReview.slice(0, 5).map((a) => (
+                      <Link key={a.id} href={`/admin/applications/${a.id}`} className="flex items-center justify-between hover:opacity-80">
+                        <div>
+                          <p className="text-sm font-medium text-[#1A2A1E]">{a.first_name} {a.last_name}</p>
+                          <p className="text-xs text-[#9FB5A9]">{(a.jobs as unknown as { title: string } | null)?.title}</p>
+                        </div>
+                        <span className="text-xs text-[#637A6F]">{daysAgo(a.updated_at)}d</span>
+                      </Link>
+                    ))}
+                  </div>
+                  <Link href="/admin/applications?stage=assessment_video_done" className="text-xs text-brand hover:underline mt-3 block">
+                    Review all →
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid lg:grid-cols-2 gap-6">
             {/* Pipeline stages */}
             <div className="bg-white rounded-xl border border-[#D8E8E0] p-6">
               <h2 className="font-medium text-[#1A2A1E] mb-5 text-sm">Pipeline stages</h2>
               <div className="space-y-3">
-                {ORDERED_STAGES.map((stage) => {
+                {ORDERED_STAGES.filter((s) => s !== 'archived').map((stage) => {
                   const count = data.stageCounts[stage] ?? 0
+                  const avgDays = data.stageTimeCounts[stage]
+                    ? Math.round((data.stageTimeTotals[stage] ?? 0) / data.stageTimeCounts[stage])
+                    : 0
                   return (
                     <div key={stage} className="flex items-center justify-between">
                       <StageBadge stage={stage} />
-                      <span className="font-medium text-[#1A2A1E] text-sm">{count}</span>
+                      <div className="flex items-center gap-3 text-right">
+                        {count > 0 && avgDays > 0 && (
+                          <span className="text-xs text-[#9FB5A9]">avg {avgDays}d</span>
+                        )}
+                        <span className="font-medium text-[#1A2A1E] text-sm w-6 text-right">{count}</span>
+                      </div>
                     </div>
                   )
                 })}

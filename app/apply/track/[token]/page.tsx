@@ -28,15 +28,33 @@ async function getApplicant(token: string) {
   return data
 }
 
+const VISIBLE_STAGES: ApplicantStage[] = [
+  'received',
+  'assessment_sent',
+  'assessment_video_done',
+  'under_review',
+  'accepted',
+]
+
+const NEXT_STEP_TEXT: Record<ApplicantStage, string> = {
+  received: 'Your application is with our team. We will review it carefully and move you forward within a few business days.',
+  assessment_sent: 'You should have received an assessment link by email. Complete the quiz and record a short video introduction to move forward.',
+  assessment_video_done: 'We have received your assessment and video. Our hiring team is reviewing your full application — you will hear from us if your profile matches.',
+  under_review: 'Your application is with the hiring manager for final review. You will hear from us with a decision soon.',
+  accepted: 'Congratulations — you have been offered a role at KoreLabs. Our team will be in touch with onboarding details.',
+  on_hold: 'Your application is on hold. We will be in touch if anything changes.',
+  archived: 'Your application has been closed. Thank you for your interest in KoreLabs.',
+}
+
 export default async function TrackPage({ params }: Props) {
   const { token } = await params
   const applicant = await getApplicant(token)
 
   if (!applicant) notFound()
 
-  const job = applicant.jobs as { title: string; slug: string; department: string } | null
-  const currentStageIndex = PIPELINE_STAGES.indexOf(applicant.stage as ApplicantStage)
-  const activeStages: ApplicantStage[] = ['received', 'assessment_sent', 'assessment_done', 'interview_scheduled', 'interviewed', 'hired']
+  const job = applicant.jobs as unknown as { title: string; slug: string; department: string } | null
+  const stage = applicant.stage as ApplicantStage
+  const currentStageIndex = VISIBLE_STAGES.indexOf(stage)
 
   return (
     <>
@@ -62,7 +80,7 @@ export default async function TrackPage({ params }: Props) {
               <div className="flex items-start justify-between mb-6">
                 <div>
                   <p className="text-xs text-[#9FB5A9] mb-1">Current status</p>
-                  <StageBadge stage={applicant.stage as ApplicantStage} />
+                  <StageBadge stage={stage} />
                 </div>
                 <p className="text-xs text-[#9FB5A9]">
                   Applied {formatRelative(applicant.created_at)}
@@ -71,13 +89,13 @@ export default async function TrackPage({ params }: Props) {
 
               {/* Progress bar */}
               <div className="space-y-3">
-                {activeStages.map((stage, i) => {
-                  const isActive = stage === applicant.stage
-                  const isPast = i < currentStageIndex
-                  const isFuture = i > currentStageIndex
+                {VISIBLE_STAGES.map((s, i) => {
+                  const isActive = s === stage
+                  const isPast = currentStageIndex >= 0 && i < currentStageIndex
+                  const isFuture = currentStageIndex >= 0 && i > currentStageIndex
 
                   return (
-                    <div key={stage} className="flex items-center gap-3">
+                    <div key={s} className="flex items-center gap-3">
                       <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs transition-colors ${
                         isPast ? 'bg-brand text-white' :
                         isActive ? 'bg-brand text-white ring-4 ring-brand/20' :
@@ -89,7 +107,7 @@ export default async function TrackPage({ params }: Props) {
                         isActive ? 'text-[#1A2A1E] font-medium' :
                         isPast ? 'text-[#637A6F]' : 'text-[#B0CBBC]'
                       }`}>
-                        {STAGE_LABELS[stage]}
+                        {STAGE_LABELS[s]}
                       </span>
                       {isActive && (
                         <span className="text-xs text-brand ml-auto">← You are here</span>
@@ -106,19 +124,7 @@ export default async function TrackPage({ params }: Props) {
             <div className="p-6 rounded-xl bg-[#F4FAF6] border border-brand/20">
               <h3 className="font-medium text-[#1A2A1E] mb-2 text-sm">What happens next</h3>
               <p className="text-sm text-[#637A6F]">
-                {applicant.stage === 'received'
-                  ? 'Your application is with our team. We will review it carefully and move you forward or send you an assessment within a few business days.'
-                  : applicant.stage === 'assessment_sent'
-                  ? 'You should have received an assessment link by email. Complete it within 48 hours to keep your application active.'
-                  : applicant.stage === 'assessment_done'
-                  ? 'We are reviewing your assessment. You will hear from us about an interview invitation shortly.'
-                  : applicant.stage === 'interview_scheduled'
-                  ? 'Your interview is confirmed. Check your email for the Zoom link and confirmation details.'
-                  : applicant.stage === 'interviewed'
-                  ? 'Your interview is complete. The team is reviewing and will be in touch with a decision soon.'
-                  : applicant.stage === 'hired'
-                  ? 'Congratulations — you have been offered a role at KoreLabs. Our team will be in touch with the details.'
-                  : 'Your application is under review. We will be in touch.'}
+                {NEXT_STEP_TEXT[stage] ?? 'Your application is under review. We will be in touch.'}
               </p>
             </div>
           </AnimatedSection>

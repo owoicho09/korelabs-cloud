@@ -1,0 +1,336 @@
+This is a major system upgrade to the existing KoreLabs Cloud hiring platform. Read the entire prompt before touching any code. Understand the full scope, then execute in order.
+
+---
+
+## CONTEXT
+
+The platform is live at korelabs.cloud. It has real applicants. The current pipeline has these problems:
+- Zoom interview stage caused missed meetings and drop-off
+- No re-engagement for stuck applicants
+- Admin lacks control and visibility
+- Pipeline stages no longer reflect reality
+
+This upgrade replaces the Zoom interview with async video, adds intelligent re-engagement, upgrades the admin into a full ATS control center, and makes the system feel like it has a mind of its own.
+
+Do not break any existing functionality. Migrate carefully.
+
+---
+
+## 1. NEW PIPELINE STAGES
+
+Replace existing stages with:
+
+```
+received → assessment_sent → assessment_video_done → under_review → accepted → on_hold → archived
+```
+
+Update the database enum, all admin UI, kanban columns, and any stage references throughout the codebase. Map existing stages to new ones:
+- received → received
+- assessment_sent → assessment_sent  
+- assessment_done → assessment_video_done (or under_review if video already submitted)
+- interview_scheduled → under_review
+- interviewed → under_review
+- hired → accepted
+- on_hold → on_hold
+
+---
+
+## 2. ASYNC VIDEO — REPLACE ZOOM ENTIRELY
+
+Remove all interview slot booking, Zoom link sending, and reminder emails for Zoom. Replace with browser-based async video recording built into the platform.
+
+### Video Recording Page (/video/[token])
+
+After quiz submission, the thank you screen shows:
+"One more step — record a short video introduction"
+With a button: "Record my video →" linking to /video/[token]
+
+The video page:
+- Uses the browser MediaRecorder API to record directly from webcam + microphone
+- Shows 3 questions one at a time, 90 seconds max per answer
+- Questions are role-specific, pulled from a new video_questions table in Supabase (seed with questions per department — see below)
+- Shows a countdown timer per question
+- Allows one retake per question
+- On final submit, uploads the recorded video blob to Supabase Storage bucket: videos/ (private)
+- Stores video metadata in a new videos table
+- After upload: applicant stage moves to assessment_video_done
+- Shows a final screen: "Thank you [First Name]. Our hiring team will review your application and be in touch if your profile matches what we're looking for."
+- Sends a "thank you / under review" email immediately via Resend
+
+### Video Questions (seed into Supabase)
+
+Create a video_questions table:
+```sql
+create table video_questions (
+  id uuid primary key default uuid_generate_v4(),
+  department text not null,
+  question text not null,
+  order_index integer not null,
+  max_seconds integer not null default 90
+);
+```
+
+Seed with 3 questions per department (engineering-backend, engineering-frontend, engineering-ai, engineering-security, engineering-devops, product-design, operations). Questions should be:
+1. "Walk us through a project or piece of work you're genuinely proud of. What was hard about it and what did you learn?"
+2. A role-specific technical or craft question
+3. "Why KoreLabs specifically — what about this problem space excites you enough to want to work on it every day?"
+
+### Videos Table
+```sql
+create table videos (
+  id uuid primary key default uuid_generate_v4(),
+  applicant_id uuid not null references applicants(id) on delete cascade,
+  question_index integer not null,
+  storage_path text not null,
+  duration_seconds integer,
+  created_at timestamptz not null default now()
+);
+```
+
+Create a private Supabase Storage bucket called videos.
+
+### Video Playback in Admin
+
+On each applicant's profile page, add a Videos tab. For each recorded video:
+- Show the question text
+- Show a video player using a signed URL from Supabase Storage (1 hour expiry)
+- Show duration
+
+---
+
+## 3. RE-ENGAGEMENT SYSTEM
+
+The system automatically follows up with stuck applicants. All re-engagement emails send via Resend scheduledAt — no cron needed.
+
+### Rules:
+
+**Stuck at assessment_sent (haven't taken quiz):**
+- 48 hours after assessment email sent → Nudge 1: warm reminder that their quiz link is still open
+- 5 days after assessment email sent → Nudge 2: "This is your last reminder — your link expires soon"
+- After Nudge 2 → move to archived automatically, no more emails
+
+**Stuck at assessment_video_done (video done but no movement):**
+- No automated email — hiring manager handles this stage manually
+
+**Implementation:**
+When the assessment email is sent in /api/apply, immediately schedule both nudge emails via Resend scheduledAt at T+48h and T+5days. Store the Resend scheduled email IDs in a new field on the applicant record so they can be cancelled if the applicant completes the assessment before the nudge fires.
+
+Add to applicants table:
+```sql
+alter table applicants add column nudge1_resend_id text;
+alter table applicants add column nudge2_resend_id text;
+```
+
+When applicant completes assessment, cancel both scheduled nudge emails via Resend API (DELETE /emails/{id}) so they never receive a nudge after completing.
+
+### Re-engage existing applicants
+
+Write a one-time migration endpoint at /api/admin/reengage-all (protected by admin auth) that:
+1. Finds all applicants currently at assessment_sent with no completed assessment
+2. Sends them a fresh assessment email immediately with a new or existing quiz token
+3. Schedules their nudge emails
+4. Returns a count of how many were re-engaged
+
+---
+
+## 4. HIRING MANAGER HANDOFF
+
+When the hiring manager reviews an applicant and wants to pass them to the next step, they have two options in the admin:
+
+### Single applicant handoff
+On each applicant profile, a "Send to Hiring Manager" button that:
+- Calls POST /api/admin/notify-hiring-manager with the applicant ID
+- Sends a rich email to ADMIN_NOTIFY_EMAIL containing:
+  - Applicant name, role, location, LinkedIn, GitHub, portfolio
+  - Their "Why KoreLabs" response
+  - Quiz score breakdown (total, fundamentals, applied, KoreLabs tier)
+  - Signed CV download link (24h expiry)
+  - Links to their video recordings (signed URLs)
+  - Admin profile link
+  - A clear subject: "Applicant ready for review — [Name] · [Role]"
+- Updates applicant stage to under_review
+- Shows success confirmation in the UI
+
+### Bulk handoff
+On the Applications list page, checkboxes on each row. A "Send selected to hiring manager" button appears when any are checked. This:
+- Calls POST /api/admin/notify-hiring-manager with an array of applicant IDs
+- Sends ONE consolidated email to ADMIN_NOTIFY_EMAIL with all selected applicants listed cleanly
+- Each applicant section in the email contains the same info as the single handoff
+- Subject: "Batch review — [N] applicants ready · KoreLabs"
+- Updates all selected applicants to under_review
+
+Add to .env:
+```
+ADMIN_NOTIFY_EMAIL=
+```
+
+---
+
+## 5. ONBOARDING TRIGGER
+
+When hiring manager marks an applicant as accepted in the admin:
+- Update stage to accepted
+- Send onboarding email to applicant via Resend immediately:
+  - Subject: "Welcome to KoreLabs, [First Name]"
+  - Warm, personal, specific to their role
+  - Body: "We've reviewed your application and we're delighted to move forward with you. A member of our team will be in touch within 1–2 business days with everything you need to get started."
+  - Personalised using GPT-4o-mini with their name, role, and why_korelabs response
+- Notify ADMIN_NOTIFY_EMAIL that this applicant was marked accepted
+
+---
+
+## 6. ADMIN UPGRADE — FULL ATS CONTROL CENTER
+
+The admin should feel like a professional ATS, not a dashboard. Every screen needs to be upgraded.
+
+### Global Search
+Add a search bar in the admin navbar. Searches across applicants by name, email, role, location. Returns results instantly with stage badges. Click result → opens applicant profile.
+
+### Applications List — Full Upgrade
+- Add checkboxes to every row for bulk selection
+- Bulk actions bar appears on selection: "Send to hiring manager", "Move to stage", "Archive selected"
+- Advanced filters panel:
+  - Filter by stage
+  - Filter by role/department  
+  - Filter by score range (e.g. 30–36)
+  - Filter by date applied range
+  - Filter by location
+- Sort by: date applied, score, name, stage
+- Show score badge on each row (color coded: green 30+, amber 20-29, red below 20)
+- Show days in current stage on each row
+- Pagination: 50 per page
+
+### Pipeline Kanban — Upgrade
+- Show accurate counts per stage (fix the current mismatch)
+- Each card shows: name, role, score badge, days in stage, flag if stuck (>5 days amber, >10 days red)
+- Drag to move between stages
+- Click card → opens full applicant drawer on the right without leaving the page
+
+### Applicant Profile — Full Upgrade
+Tabs: Application, CV, Assessment, Videos, Timeline, Notes
+
+- **Application tab**: all personal info, why KoreLabs, links
+- **CV tab**: inline PDF viewer with signed URL, download button
+- **Assessment tab**: total score, tier breakdown with visual bars, each question with selected answer (green correct, red wrong), time taken
+- **Videos tab**: all 3 video recordings with player, question shown above each
+- **Timeline tab**: every action logged with timestamp (applied, emails sent, quiz started, quiz completed, video uploaded, stage changes, emails to hiring manager)
+- **Notes tab**: rich text notes field, autosaves, shows last updated
+
+Actions sidebar on every profile:
+- Current stage with dropdown to change
+- "Send to hiring manager" button
+- "Send onboarding email" button (only active when stage is accepted)
+- "Re-send assessment" button
+- "Archive" button
+- Score summary
+
+### Pipeline Intelligence Panel (new section on dashboard)
+Show:
+- Applicants stuck >5 days in assessment_sent (list with quick action to nudge)
+- Applicants at assessment_video_done awaiting review (list with quick action to send to hiring manager)
+- Upcoming interviews (remove this since we removed Zoom — replace with "Applicants accepted this week")
+- Drop-off rate per stage (% who moved forward vs stayed)
+- Average time per stage
+- Top performing roles by application volume
+
+### Jobs Management — Upgrade
+- Show application count per job
+- Show average score per job
+- Toggle job active/paused with confirmation
+- Edit all job fields inline
+
+---
+
+## 7. EMAIL UPGRADES
+
+Add these new email types to lib/email.ts:
+
+- **video_reminder**: "You're almost done — just one short video left" (sent if applicant completes quiz but doesn't record video within 24h)
+- **nudge_1**: Warm 48h reminder to complete assessment
+- **nudge_2**: Final 5-day reminder before link expires  
+- **under_review**: "Thank you — our team will review your application and be in touch"
+- **onboarding**: "Welcome to KoreLabs" — personalised with GPT-4o-mini
+- **hiring_manager_single**: Rich internal notification for single applicant
+- **hiring_manager_batch**: Rich internal notification for multiple applicants
+
+All applicant-facing emails personalised with GPT-4o-mini as before.
+
+---
+
+## 8. DATABASE ADDITIONS
+
+Run these additions (do not drop existing tables):
+
+```sql
+-- Video questions
+create table video_questions (
+  id uuid primary key default uuid_generate_v4(),
+  department text not null,
+  question text not null,
+  order_index integer not null,
+  max_seconds integer not null default 90
+);
+
+-- Videos
+create table videos (
+  id uuid primary key default uuid_generate_v4(),
+  applicant_id uuid not null references applicants(id) on delete cascade,
+  question_index integer not null,
+  storage_path text not null,
+  duration_seconds integer,
+  created_at timestamptz not null default now()
+);
+
+-- Add nudge tracking to applicants
+alter table applicants add column if not exists nudge1_resend_id text;
+alter table applicants add column if not exists nudge2_resend_id text;
+alter table applicants add column if not exists video_reminder_resend_id text;
+
+-- Update stage enum (PostgreSQL requires recreating the type)
+-- Handle this carefully without dropping existing data
+```
+
+For the stage enum migration, do it safely:
+1. Add new values to the enum
+2. Update existing rows to map old values to new ones
+3. Remove old values only after migration is confirmed
+
+---
+
+## 9. ENV ADDITIONS
+
+Add to .env.example:
+```
+ADMIN_NOTIFY_EMAIL=
+```
+
+---
+
+## 10. BUILD ORDER
+
+1. Database migrations (new tables, enum update, alter statements)
+2. Supabase Storage bucket: videos (private)
+3. New email templates
+4. Video recording page and upload API
+5. Re-engagement scheduling in /api/apply
+6. Nudge cancellation in /api/quiz/submit/[token]
+7. Hiring manager notification endpoints (single + bulk)
+8. Onboarding email trigger
+9. Admin search and filter upgrades
+10. Applications list bulk actions and checkboxes
+11. Kanban pipeline fixes and card upgrades
+12. Applicant profile new tabs (Videos, upgraded Assessment, Timeline)
+13. Pipeline intelligence panel on dashboard
+14. Re-engage all endpoint for existing applicants
+15. npm run build — zero errors required
+
+---
+
+## QUALITY BAR
+
+- The admin must feel like a professional ATS. Every interaction should be fast, clear, and purposeful.
+- The video recording experience must work reliably on Chrome, Firefox, and Safari on both desktop and mobile.
+- No applicant should ever fall through the cracks — the re-engagement system and pipeline intelligence panel exist to prevent this.
+- Every email must feel human and personalised.
+- npm run build must pass with zero errors before finishing.
+- After building, provide a summary of every new route, component, and database change made.

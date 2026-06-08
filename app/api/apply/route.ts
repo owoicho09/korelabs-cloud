@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { sendAcknowledgmentEmail, sendAssessmentEmail, sendNewApplicantNotification } from '@/lib/email'
+import {
+  sendAcknowledgmentEmail,
+  sendAssessmentEmail,
+  sendNudge1Email,
+  sendNudge2Email,
+  sendNewApplicantNotification,
+} from '@/lib/email'
 import type { Applicant } from '@/lib/types'
-import { addHours } from 'date-fns'
+import { addHours, addDays } from 'date-fns'
 import { STATIC_JOBS } from '@/lib/jobs'
 
 export async function POST(req: Request) {
@@ -41,10 +47,7 @@ export async function POST(req: Request) {
       const path = `${crypto.randomUUID()}.${ext}`
       const { error: uploadError } = await db.storage
         .from('cvs')
-        .upload(path, Buffer.from(buf), {
-          contentType: cvFile.type,
-          cacheControl: '3600',
-        })
+        .upload(path, Buffer.from(buf), { contentType: cvFile.type, cacheControl: '3600' })
       if (!uploadError) cvPath = path
     }
 
@@ -76,13 +79,11 @@ export async function POST(req: Request) {
 
     const jobTitle = (job as { title: string }).title
 
-    // Send acknowledgment immediately
     await sendAcknowledgmentEmail(applicant as unknown as Applicant, jobTitle)
     await sendNewApplicantNotification(applicant as unknown as Applicant, jobTitle)
 
-    // Create the assessment record now so the quiz URL is ready, then schedule
-    // the email to arrive 32 hours from now via Resend's native scheduledAt.
-    const expiresAt = addHours(new Date(), 48)
+    // Link expires in 7 days so nudge emails are still valid
+    const expiresAt = addDays(new Date(), 7)
     const { data: assessment, error: assessmentError } = await db
       .from('assessments')
       .insert({ applicant_id: applicant.id, expires_at: expiresAt.toISOString() })
@@ -92,15 +93,45 @@ export async function POST(req: Request) {
     if (assessmentError || !assessment) {
       console.error('[apply] Failed to create assessment:', assessmentError)
     } else {
-      await db.from('applicants').update({ stage: 'assessment_sent' }).eq('id', applicant.id)
-      const scheduledAt = addHours(new Date(), 32).toISOString()
+      await db
+        .from('applicants')
+        .update({ stage: 'assessment_sent', stage_updated_at: new Date().toISOString() })
+        .eq('id', applicant.id)
+
+      // Assessment email scheduled 32h from now
+      const assessmentScheduledAt = addHours(new Date(), 32).toISOString()
       await sendAssessmentEmail(
         applicant as unknown as Applicant,
         jobTitle,
         assessment.quiz_token,
         expiresAt,
-        scheduledAt
+        assessmentScheduledAt
       )
+
+      // Schedule nudge emails relative to assessment send time
+      const nudge1At = addHours(new Date(), 80).toISOString()  // 32h + 48h
+      const nudge2At = addDays(new Date(), 7).toISOString()    // 32h + ~5days
+
+      const nudge1Id = await sendNudge1Email(
+        applicant as unknown as Applicant,
+        jobTitle,
+        assessment.quiz_token,
+        nudge1At
+      )
+      const nudge2Id = await sendNudge2Email(
+        applicant as unknown as Applicant,
+        jobTitle,
+        assessment.quiz_token,
+        nudge2At
+      )
+
+      // Store Resend IDs so we can cancel nudges if quiz is completed
+      if (nudge1Id || nudge2Id) {
+        await db
+          .from('applicants')
+          .update({ nudge1_resend_id: nudge1Id ?? null, nudge2_resend_id: nudge2Id ?? null })
+          .eq('id', applicant.id)
+      }
     }
 
     return NextResponse.json({ tracking_token: applicant.tracking_token }, { status: 201 })
