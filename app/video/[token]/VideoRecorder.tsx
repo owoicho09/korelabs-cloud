@@ -51,7 +51,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
   const [allDone, setAllDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cameraGranted, setCameraGranted] = useState(false)
-  const [recordStartTime, setRecordStartTime] = useState<number>(0)
+  const recordStartTimeRef = useRef<number>(0)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const previewRef = useRef<HTMLVideoElement>(null)
@@ -90,20 +90,10 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
     }
   }, [stopStream])
 
-  const startCountdown = useCallback(async () => {
-    if (!cameraGranted) await startCamera()
-    setRecordingState('countdown')
-    setCountdown(3)
-    let c = 3
-    const iv = setInterval(() => {
-      c -= 1
-      setCountdown(c)
-      if (c <= 0) {
-        clearInterval(iv)
-        beginRecording()
-      }
-    }, 1000)
-  }, [cameraGranted, startCamera])
+  const stopRecording = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    recorderRef.current?.stop()
+  }, [])
 
   const beginRecording = useCallback(() => {
     if (!streamRef.current) return
@@ -118,7 +108,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
 
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: mimeType || 'video/webm' })
-      const duration = Math.round((Date.now() - recordStartTime) / 1000)
+      const duration = Math.round((Date.now() - recordStartTimeRef.current) / 1000)
       setBlobs((prev) => {
         const next = [...prev]
         next[currentQ] = blob
@@ -129,7 +119,6 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
         next[currentQ] = duration
         return next
       })
-      // Show preview
       if (previewRef.current) {
         previewRef.current.src = URL.createObjectURL(blob)
         previewRef.current.muted = false
@@ -139,7 +128,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
 
     recorder.start(100)
     recorderRef.current = recorder
-    setRecordStartTime(Date.now())
+    recordStartTimeRef.current = Date.now()
     setRecordingState('recording')
     setTimeLeft(question.maxSeconds)
 
@@ -153,12 +142,22 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
         return t - 1
       })
     }, 1000)
-  }, [streamRef, currentQ, question, recordStartTime])
+  }, [streamRef, currentQ, question, stopRecording])
 
-  const stopRecording = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current)
-    recorderRef.current?.stop()
-  }, [])
+  const startCountdown = useCallback(async () => {
+    if (!cameraGranted) await startCamera()
+    setRecordingState('countdown')
+    setCountdown(3)
+    let c = 3
+    const iv = setInterval(() => {
+      c -= 1
+      setCountdown(c)
+      if (c <= 0) {
+        clearInterval(iv)
+        beginRecording()
+      }
+    }, 1000)
+  }, [cameraGranted, startCamera, beginRecording])
 
   const retake = useCallback(async () => {
     setRetakeUsed((prev) => {

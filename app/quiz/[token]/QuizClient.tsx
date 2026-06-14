@@ -30,7 +30,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-export function QuizClient({ token, questions, firstName, jobTitle }: Props) {
+export function QuizClient({ token, questions, firstName, jobTitle, assessmentId: _assessmentId }: Props) {
   const [started, setStarted] = useState(false)
   const [answers, setAnswers] = useState<Record<string, number>>({})
   const [timeLeft, setTimeLeft] = useState(DURATION)
@@ -112,7 +112,10 @@ export function QuizClient({ token, questions, firstName, jobTitle }: Props) {
               </div>
             ))}
           </div>
-          <Button size="lg" onClick={() => setStarted(true)}>
+          <Button size="lg" onClick={() => {
+            setStarted(true)
+            fetch(`/api/quiz/start/${token}`, { method: 'PATCH' }).catch(() => {})
+          }}>
             Start assessment
           </Button>
         </div>

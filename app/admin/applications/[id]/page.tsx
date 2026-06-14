@@ -42,6 +42,7 @@ async function getApplicant(id: string) {
     duration_seconds: number | null
     signed_url: string | null
     question_text: string
+    created_at: string
   }> = []
 
   if (videos && videos.length > 0) {
@@ -61,6 +62,7 @@ async function getApplicant(id: string) {
         duration_seconds: video.duration_seconds,
         signed_url: signed?.signedUrl ?? null,
         question_text: q?.question ?? `Question ${video.question_index + 1}`,
+        created_at: video.created_at,
       })
     }
   }

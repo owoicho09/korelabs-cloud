@@ -1,42 +1,21 @@
--- KoreLabs Cloud — Video Upgrade Migration
--- ⚠️  MUST BE RUN IN TWO SEPARATE STEPS in the Supabase SQL editor.
--- PostgreSQL requires ALTER TYPE ... ADD VALUE to be committed before the new
--- values can be used in DML. Running both steps in one session causes error 55P04.
---
--- STEP A: paste and run only the lines marked STEP A below, then
--- STEP B: paste and run the rest (everything marked STEP B).
+-- KoreLabs Cloud — Step B: Schema changes and data migration
+-- Run this AFTER 001a_enum_values.sql has successfully committed.
 
--- ═══════════════════════════════════════════════════════════════════════════
--- STEP A — Add enum values (run this first, on its own, then stop)
--- ═══════════════════════════════════════════════════════════════════════════
-
-alter type applicant_stage add value if not exists 'assessment_video_done';
-alter type applicant_stage add value if not exists 'under_review';
-alter type applicant_stage add value if not exists 'accepted';
-alter type applicant_stage add value if not exists 'archived';
-
--- ═══════════════════════════════════════════════════════════════════════════
--- STEP B — Everything else (run after Step A has committed)
--- ═══════════════════════════════════════════════════════════════════════════
-
--- ─── 2. Migrate existing rows to new stage names ──────────────────────────
-
-update applicants set stage = 'under_review'         where stage = 'interview_scheduled';
-update applicants set stage = 'under_review'         where stage = 'interviewed';
-update applicants set stage = 'accepted'             where stage = 'hired';
+-- Migrate existing rows to new stage names
+update applicants set stage = 'under_review'          where stage = 'interview_scheduled';
+update applicants set stage = 'under_review'          where stage = 'interviewed';
+update applicants set stage = 'accepted'              where stage = 'hired';
 update applicants set stage = 'assessment_video_done' where stage = 'assessment_done';
 
--- ─── 3. Add nudge & video tracking columns to applicants ──────────────────
-
-alter table applicants add column if not exists nudge1_resend_id          text;
-alter table applicants add column if not exists nudge2_resend_id          text;
-alter table applicants add column if not exists video_reminder_resend_id  text;
-alter table applicants add column if not exists stage_updated_at          timestamptz;
+-- Add tracking columns to applicants
+alter table applicants add column if not exists nudge1_resend_id         text;
+alter table applicants add column if not exists nudge2_resend_id         text;
+alter table applicants add column if not exists video_reminder_resend_id text;
+alter table applicants add column if not exists stage_updated_at         timestamptz;
 
 update applicants set stage_updated_at = updated_at where stage_updated_at is null;
 
--- ─── 4. video_questions table ─────────────────────────────────────────────
-
+-- video_questions table
 create table if not exists video_questions (
   id          uuid primary key default uuid_generate_v4(),
   department  text not null,
@@ -55,8 +34,7 @@ create policy "Service role manages video questions"
   on video_questions for all
   using (auth.role() = 'service_role');
 
--- ─── 5. videos table ──────────────────────────────────────────────────────
-
+-- videos table
 create table if not exists videos (
   id               uuid primary key default uuid_generate_v4(),
   applicant_id     uuid not null references applicants(id) on delete cascade,
@@ -66,8 +44,7 @@ create table if not exists videos (
   created_at       timestamptz not null default now()
 );
 
-create index        if not exists idx_videos_applicant_id      on videos(applicant_id);
--- Required for upsert onConflict on retakes
+create index        if not exists idx_videos_applicant_id       on videos(applicant_id);
 create unique index if not exists idx_videos_applicant_question on videos(applicant_id, question_index);
 
 alter table videos enable row level security;
@@ -77,9 +54,7 @@ create policy "Service role manages videos"
   on videos for all
   using (auth.role() = 'service_role');
 
--- ─── 6. Seed video_questions ──────────────────────────────────────────────
--- Idempotent: only inserts if the department has no questions yet.
-
+-- Seed video_questions (idempotent — skips departments already seeded)
 insert into video_questions (department, question, order_index, max_seconds)
 select * from (values
   ('engineering-backend',  'Walk us through a project or piece of work you are genuinely proud of. What was hard about it and what did you learn?', 1, 90),
@@ -113,7 +88,3 @@ select * from (values
 where not exists (
   select 1 from video_questions vq where vq.department = v.department
 );
-
--- ─── 7. Storage bucket ────────────────────────────────────────────────────
--- Create a private bucket named 'videos' in Supabase Storage UI.
--- Signed URLs are generated server-side with 1-hour expiry.

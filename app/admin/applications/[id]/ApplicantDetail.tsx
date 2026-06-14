@@ -66,6 +66,7 @@ interface VideoEntry {
   duration_seconds: number | null
   signed_url: string | null
   question_text: string
+  created_at: string
 }
 
 interface EmailLog {
@@ -142,9 +143,13 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
     setActionLoading('assessment')
     setActionResult(null)
     try {
-      const res = await fetch('/api/admin/reengage-all', { method: 'POST' })
+      const res = await fetch('/api/admin/trigger-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicant_id: applicant.id, type: 'send_assessment' }),
+      })
       const json = await res.json()
-      setActionResult({ ok: res.ok, message: res.ok ? `Re-engaged ${json.reengaged} applicant(s)` : json.error ?? 'Failed' })
+      setActionResult({ ok: res.ok, message: res.ok ? 'Assessment email sent' : json.error ?? 'Failed' })
     } finally {
       setActionLoading(null)
     }
@@ -173,7 +178,7 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
     assessment?.started_at ? { time: assessment.started_at, label: 'Started assessment', color: 'default' } : null,
     assessment?.completed_at ? { time: assessment.completed_at, label: 'Completed assessment', color: 'success' } : null,
     ...videoData.map((v) => ({
-      time: v.id, // use id as placeholder since we don't have created_at here
+      time: v.created_at,
       label: `Uploaded video — Q${v.question_index + 1}`,
       color: 'success',
     })),
