@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { StageBadge } from '@/components/ui/Badge'
 import { startOfWeek } from 'date-fns'
 import { AlertTriangle, Clock, CheckCircle, TrendingUp } from 'lucide-react'
+import { SendVideoInvitesButton } from './SendVideoInvitesButton'
 
 export const revalidate = 0
 
@@ -22,6 +23,7 @@ async function getDashboardData() {
     { count: accepted },
     { data: stuckAssessment },
     { data: awaitingReview },
+    { data: needsVideoInvite },
   ] = await Promise.all([
     db.from('applicants').select('*', { count: 'exact', head: true }),
     db.from('applicants').select('*', { count: 'exact', head: true }).gte('created_at', weekStart),
@@ -41,6 +43,10 @@ async function getDashboardData() {
       .eq('stage', 'assessment_video_done')
       .order('updated_at')
       .limit(10),
+    // Has completed assessment but no videos yet
+    db.from('applicants')
+      .select('id, assessments!inner(completed_at), videos(id)')
+      .not('stage', 'in', '("accepted","archived")'),
   ])
 
   const stageCounts: Record<string, number> = {}
@@ -53,6 +59,13 @@ async function getDashboardData() {
     stageTimeCounts[a.stage] = (stageTimeCounts[a.stage] ?? 0) + 1
   }
 
+  const eligibleForVideoInvite = (needsVideoInvite ?? []).filter((a) => {
+    const assessments = a.assessments as { completed_at: string | null }[] | null
+    const completed = assessments?.some((ass) => ass.completed_at)
+    const hasVideos = (a.videos as { id: string }[] | null)?.length ?? 0
+    return completed && hasVideos === 0
+  }).length
+
   return {
     total: total ?? 0,
     thisWeek: thisWeek ?? 0,
@@ -63,6 +76,7 @@ async function getDashboardData() {
     recent: recent ?? [],
     stuckAssessment: stuckAssessment ?? [],
     awaitingReview: awaitingReview ?? [],
+    eligibleForVideoInvite,
   }
 }
 
@@ -100,6 +114,19 @@ export default async function AdminOverview() {
               </div>
             ))}
           </div>
+
+          {/* Bulk video invite */}
+          {data.eligibleForVideoInvite > 0 && (
+            <div className="mb-6 p-5 bg-white border border-[#D8E8E0] rounded-xl flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-[#1A2A1E]">
+                  {data.eligibleForVideoInvite} applicant{data.eligibleForVideoInvite !== 1 ? 's' : ''} completed the assessment but haven't recorded their video yet.
+                </p>
+                <p className="text-xs text-[#9FB5A9] mt-0.5">Send them their recording link in one click.</p>
+              </div>
+              <SendVideoInvitesButton eligibleCount={data.eligibleForVideoInvite} />
+            </div>
+          )}
 
           {/* Pipeline Intelligence Panel */}
           {(data.stuckAssessment.length > 0 || data.awaitingReview.length > 0) && (

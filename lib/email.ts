@@ -261,6 +261,28 @@ export async function sendUnderReviewEmail(applicant: Applicant, roleTitle: stri
   await logEmail(applicant.id, applicant.email, subject, 'under_review', resendId, error)
 }
 
+export async function sendRejectionEmail(applicant: Applicant, roleTitle: string): Promise<void> {
+  const resend = getResend()
+  const subject = `Your KoreLabs application — ${roleTitle}`
+
+  const body = await personaliseEmail({ type: 'rejection', applicantName: applicant.first_name, roleTitle })
+  const html = buildEmailHtml(`Hi ${applicant.first_name},`, body)
+
+  let resendId: string | undefined
+  let error: string | undefined
+
+  if (resend) {
+    try {
+      const result = await resend.emails.send({ from: FROM, to: applicant.email, subject, html })
+      resendId = result.data?.id
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Unknown error'
+    }
+  }
+
+  await logEmail(applicant.id, applicant.email, subject, 'rejection', resendId, error)
+}
+
 export async function sendOnboardingEmail(applicant: Applicant, roleTitle: string): Promise<void> {
   const resend = getResend()
   const subject = `Welcome to KoreLabs, ${applicant.first_name}`

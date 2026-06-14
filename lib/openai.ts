@@ -11,7 +11,7 @@ function getClient(): OpenAI | null {
 }
 
 interface PersonaliseEmailParams {
-  type: 'acknowledgment' | 'assessment' | 'interview_invite' | 'reminder_24h' | 'reminder_1h' | 'pass' | 'nudge_1' | 'nudge_2' | 'video_reminder' | 'under_review' | 'onboarding'
+  type: 'acknowledgment' | 'assessment' | 'interview_invite' | 'reminder_24h' | 'reminder_1h' | 'pass' | 'nudge_1' | 'nudge_2' | 'video_reminder' | 'under_review' | 'onboarding' | 'rejection'
   applicantName: string
   roleTitle: string
   whyKorelabs?: string
@@ -83,6 +83,10 @@ They have completed the assessment. Tell them the team was impressed and wants t
 
     case 'onboarding':
       return `Write a warm, personal, and exciting welcome message to ${applicantName} who has been accepted for the ${roleTitle} role at KoreLabs Cloud.${whyKorelabs ? ` Their reason for joining: "${whyKorelabs.slice(0, 150)}".` : ''} Tell them the team is delighted to move forward and that someone will be in touch within 1-2 business days with everything they need to get started. Make it feel genuine, like it was written by a real person who is thrilled to have them join. ${context ?? ''}`
+
+    case 'rejection':
+      return `Write a short, respectful, and human rejection note to ${applicantName} who applied for the ${roleTitle} role at KoreLabs Cloud. Do not be vague or corporate. Acknowledge they took the time to apply and complete the process. Tell them the team has decided to move forward with other candidates at this time. Leave them feeling respected, not dismissed. 3 sentences maximum. No clichés like "we'll keep your CV on file."
+`
   }
 }
 
@@ -122,5 +126,8 @@ function getDefaultEmailBody(params: PersonaliseEmailParams): string {
 
     case 'onboarding':
       return `We have reviewed your application and we are delighted to move forward with you for the ${roleTitle} role, ${applicantName}. A member of our team will be in touch within 1–2 business days with everything you need to get started. Welcome to KoreLabs Cloud.`
+
+    case 'rejection':
+      return `Thank you for the time and effort you put into your application for the ${roleTitle} role at KoreLabs Cloud, ${applicantName}. After careful consideration, we have decided to move forward with other candidates whose experience more closely matches what we need at this stage. We genuinely appreciate your interest in KoreLabs and wish you the very best.`
   }
 }

@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { CheckCircle, Video } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
-import Link from 'next/link'
 
 interface Question {
   id: string
@@ -31,11 +30,13 @@ function formatTime(seconds: number): string {
 }
 
 export function QuizClient({ token, questions, firstName, jobTitle, assessmentId: _assessmentId }: Props) {
+  const router = useRouter()
   const [started, setStarted] = useState(false)
   const [answers, setAnswers] = useState<Record<string, number>>({})
   const [timeLeft, setTimeLeft] = useState(DURATION)
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [currentSection, setCurrentSection] = useState(0)
 
   const sections = [
@@ -49,20 +50,28 @@ export function QuizClient({ token, questions, firstName, jobTitle, assessmentId
   )
 
   const submitQuiz = useCallback(async (finalAnswers: Record<string, number>) => {
+    setSubmitted(true) // stop the timer immediately
     setSubmitting(true)
     try {
-      await fetch(`/api/quiz/submit/${token}`, {
+      const res = await fetch(`/api/quiz/submit/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ answers: finalAnswers }),
       })
-      setSubmitted(true)
+      // 409 = already submitted in a previous session — still safe to proceed
+      if (res.ok || res.status === 409) {
+        router.push(`/video/${token}`)
+      } else {
+        setSubmitted(false)
+        setSubmitting(false)
+        setSubmitError('Submission failed. Please try again.')
+      }
     } catch {
-      setSubmitted(true)
-    } finally {
+      setSubmitted(false)
       setSubmitting(false)
+      setSubmitError('Network error. Please check your connection and try again.')
     }
-  }, [token])
+  }, [token, router])
 
   useEffect(() => {
     if (!started || submitted) return
@@ -118,30 +127,6 @@ export function QuizClient({ token, questions, firstName, jobTitle, assessmentId
           }}>
             Start assessment
           </Button>
-        </div>
-      </div>
-    )
-  }
-
-  if (submitted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-8 bg-[#FAFAF8]">
-        <div className="max-w-md text-center">
-          <div className="w-16 h-16 rounded-full bg-brand-50 flex items-center justify-center mb-5 mx-auto">
-            <CheckCircle size={32} className="text-brand" />
-          </div>
-          <h2 className="font-display text-2xl text-[#1A2A1E] mb-3">Assessment submitted.</h2>
-          <p className="text-[#637A6F] mb-8">
-            One more step — record a short video introduction so the hiring team can get to know you.
-          </p>
-          <Link
-            href={`/video/${token}`}
-            className="inline-flex items-center gap-2 bg-brand text-white px-6 py-3 rounded-xl font-medium hover:bg-brand/90 transition-colors"
-          >
-            <Video size={18} />
-            Record my video
-          </Link>
-          <p className="text-xs text-[#9FB5A9] mt-4">Takes about 5 minutes · 3 questions · 90 seconds each</p>
         </div>
       </div>
     )
@@ -238,6 +223,12 @@ export function QuizClient({ token, questions, firstName, jobTitle, assessmentId
         </div>
 
         {/* Navigation */}
+        {submitError && (
+          <div className="mt-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+            {submitError}
+          </div>
+        )}
+
         <div className="flex gap-3 mt-8">
           {currentSection > 0 && (
             <Button variant="outline" onClick={() => setCurrentSection((s) => s - 1)}>

@@ -15,7 +15,7 @@ async function getVideoData(quizToken: string) {
 
   const { data: assessment } = await db
     .from('assessments')
-    .select('applicant_id, completed_at, applicants(first_name, jobs(title, department))')
+    .select('applicant_id, completed_at, applicants(first_name, tracking_token, jobs(title, department))')
     .eq('quiz_token', quizToken)
     .single()
 
@@ -27,22 +27,24 @@ async function getVideoData(quizToken: string) {
 
   const applicantData = assessment.applicants as unknown as {
     first_name: string
+    tracking_token: string | null
     jobs: { title: string; department: string } | null
   } | null
 
   const department = applicantData?.jobs?.department ?? 'engineering-backend'
   const firstName = applicantData?.first_name ?? 'there'
   const roleTitle = applicantData?.jobs?.title ?? 'the role'
+  const trackingToken = applicantData?.tracking_token ?? null
 
-  // Fetch video questions for this department
+  // Fetch the single video question for this department
   const { data: questions } = await db
     .from('video_questions')
     .select('id, question, order_index, max_seconds')
     .eq('department', department)
     .order('order_index')
+    .limit(1)
 
   if (!questions || questions.length === 0) {
-    // Fall back to generic questions
     return {
       quizNotDone: false,
       firstName,
@@ -50,8 +52,6 @@ async function getVideoData(quizToken: string) {
       quizToken,
       questions: [
         { id: '1', question: 'Walk us through a project or piece of work you are genuinely proud of. What was hard about it and what did you learn?', order_index: 1, max_seconds: 90 },
-        { id: '2', question: 'Tell us about a meaningful technical or craft decision you made. What did you consider and what did you choose?', order_index: 2, max_seconds: 90 },
-        { id: '3', question: 'Why KoreLabs specifically — what about this problem space excites you enough to want to work on it every day?', order_index: 3, max_seconds: 90 },
       ],
     }
   }
@@ -62,9 +62,9 @@ async function getVideoData(quizToken: string) {
     .select('*', { count: 'exact', head: true })
     .eq('applicant_id', assessment.applicant_id)
 
-  const alreadyComplete = (count ?? 0) >= 3
+  const alreadyComplete = (count ?? 0) >= 1
 
-  return { quizNotDone: false, firstName, roleTitle, quizToken, questions, alreadyComplete }
+  return { quizNotDone: false, firstName, roleTitle, quizToken, questions, alreadyComplete, trackingToken }
 }
 
 export default async function VideoPage({ params }: Props) {
@@ -107,6 +107,7 @@ export default async function VideoPage({ params }: Props) {
       quizToken={token}
       firstName={data.firstName ?? 'there'}
       roleTitle={data.roleTitle ?? 'the role'}
+      trackingToken={data.trackingToken ?? undefined}
       questions={(data.questions ?? []).map((q) => ({
         id: q.id,
         question: q.question,

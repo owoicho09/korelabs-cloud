@@ -3,65 +3,45 @@ import { getAdminClient } from '@/lib/supabase/admin'
 import { cancelScheduledEmail, sendUnderReviewEmail } from '@/lib/email'
 import type { Applicant } from '@/lib/types'
 
+// This route confirms a video upload that the client sent directly to Supabase Storage.
+// It receives only lightweight JSON (no file), records the metadata, and updates the stage.
 export async function POST(req: Request) {
   const db = getAdminClient()
   if (!db) return NextResponse.json({ error: 'DB unavailable' }, { status: 503 })
 
   try {
-    const formData = await req.formData()
-    const quizToken = formData.get('quiz_token') as string
-    const questionIndexStr = formData.get('question_index') as string
-    const videoFile = formData.get('video') as File | null
-    const durationStr = formData.get('duration_seconds') as string | null
+    const { quiz_token, question_index, duration_seconds } = await req.json()
 
-    if (!quizToken || questionIndexStr === null || !videoFile) {
+    if (!quiz_token || question_index === undefined) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    const questionIndex = parseInt(questionIndexStr, 10)
-    if (isNaN(questionIndex) || questionIndex < 0 || questionIndex > 2) {
-      return NextResponse.json({ error: 'question_index must be 0, 1, or 2' }, { status: 400 })
+    if (question_index !== 0) {
+      return NextResponse.json({ error: 'question_index must be 0' }, { status: 400 })
     }
 
-    // Look up applicant via quiz token
     const { data: assessment } = await db
       .from('assessments')
-      .select('applicant_id, applicants(id, first_name, last_name, email, why_korelabs, phone, location, linkedin_url, github_url, portfolio_url, cv_path, stage, notes, nudge1_resend_id, nudge2_resend_id, video_reminder_resend_id, stage_updated_at, tracking_token, created_at, updated_at, job_id, jobs(title, department))')
-      .eq('quiz_token', quizToken)
+      .select('applicant_id, completed_at, applicants(id, first_name, last_name, email, why_korelabs, phone, location, linkedin_url, github_url, portfolio_url, cv_path, stage, notes, nudge1_resend_id, nudge2_resend_id, video_reminder_resend_id, stage_updated_at, tracking_token, created_at, updated_at, job_id, jobs(title, department))')
+      .eq('quiz_token', quiz_token)
       .single()
 
     if (!assessment) return NextResponse.json({ error: 'Invalid token' }, { status: 404 })
+    if (!assessment.completed_at) return NextResponse.json({ error: 'Assessment not completed' }, { status: 422 })
 
     const applicantId = assessment.applicant_id
     const applicantData = assessment.applicants as unknown as (Applicant & { jobs?: { title: string; department: string } | null })
 
-    // Upload video to Supabase Storage
-    const buf = await videoFile.arrayBuffer()
-    const ext = videoFile.type.includes('mp4') ? 'mp4' : 'webm'
-    const storagePath = `${applicantId}/${questionIndex}.${ext}`
+    // Derive storage path server-side — never trust the client-sent value
+    const storagePath = `${applicantId}/${question_index}.webm`
 
-    const { error: uploadError } = await db.storage
-      .from('videos')
-      .upload(storagePath, Buffer.from(buf), {
-        contentType: videoFile.type,
-        upsert: true, // overwrite if retaking
-      })
-
-    if (uploadError) {
-      console.error('[video/upload] Storage error:', uploadError)
-      return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
-    }
-
-    const durationSeconds = durationStr ? parseInt(durationStr, 10) : null
-
-    // Upsert video record (upsert in case of retake)
     const { error: dbError } = await db
       .from('videos')
       .upsert({
         applicant_id: applicantId,
-        question_index: questionIndex,
+        question_index,
         storage_path: storagePath,
-        duration_seconds: isNaN(durationSeconds ?? NaN) ? null : durationSeconds,
+        duration_seconds: typeof duration_seconds === 'number' && !isNaN(duration_seconds) ? duration_seconds : null,
       }, { onConflict: 'applicant_id,question_index' })
 
     if (dbError) {
@@ -69,42 +49,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'DB insert failed' }, { status: 500 })
     }
 
-    // Check total videos submitted
-    const { count } = await db
-      .from('videos')
-      .select('*', { count: 'exact', head: true })
-      .eq('applicant_id', applicantId)
+    const videoReminderId = applicantData?.video_reminder_resend_id
+    if (videoReminderId) await cancelScheduledEmail(videoReminderId)
 
-    const totalVideos = count ?? 0
-    const isComplete = totalVideos >= 3
+    await db.from('applicants').update({
+      stage: 'assessment_video_done',
+      stage_updated_at: new Date().toISOString(),
+      video_reminder_resend_id: null,
+    }).eq('id', applicantId)
 
-    if (isComplete) {
-      // Cancel video reminder if still pending
-      const videoReminderId = applicantData?.video_reminder_resend_id
-      if (videoReminderId) {
-        await cancelScheduledEmail(videoReminderId)
-      }
-
-      // Move to assessment_video_done
-      await db.from('applicants').update({
-        stage: 'assessment_video_done',
-        stage_updated_at: new Date().toISOString(),
-        video_reminder_resend_id: null,
-      }).eq('id', applicantId)
-
-      // Send under_review email to applicant
-      const job = applicantData?.jobs
-      const roleTitle = job?.title ?? 'the role'
-      try {
-        await sendUnderReviewEmail(applicantData, roleTitle)
-      } catch (e) {
-        console.error('[video/upload] sendUnderReviewEmail failed:', e)
-      }
+    const roleTitle = (applicantData?.jobs as { title: string } | null)?.title ?? 'the role'
+    try {
+      await sendUnderReviewEmail(applicantData, roleTitle)
+    } catch (e) {
+      console.error('[video/upload] sendUnderReviewEmail failed:', e)
     }
 
-    return NextResponse.json({ ok: true, complete: isComplete, videos_submitted: totalVideos })
+    return NextResponse.json({ ok: true, complete: true })
   } catch (e) {
     console.error('[video/upload] Error:', e)
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'Upload failed' }, { status: 500 })
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed' }, { status: 500 })
   }
 }

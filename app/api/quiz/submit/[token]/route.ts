@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
-import { cancelScheduledEmail, sendVideoReminderEmail } from '@/lib/email'
-import type { Applicant } from '@/lib/types'
-import { addHours } from 'date-fns'
+import { cancelScheduledEmail } from '@/lib/email'
 
 interface RouteContext {
   params: Promise<{ token: string }>
@@ -76,22 +74,9 @@ export async function POST(req: Request, { params }: RouteContext) {
       if (nudge1Id) await cancelScheduledEmail(nudge1Id)
       if (nudge2Id) await cancelScheduledEmail(nudge2Id)
 
-      // Schedule video reminder for 24h from now if no video submitted yet
-      const jobTitle = (assessment.applicants?.jobs as { title: string } | null)?.title ?? 'the role'
-      const videoReminderAt = addHours(new Date(), 24).toISOString()
-
-      const videoReminderId = await sendVideoReminderEmail(
-        applicantData as unknown as Applicant,
-        jobTitle,
-        token,
-        videoReminderAt
-      )
-
-      // Persist cancellation of nudges and new video reminder ID
       await db.from('applicants').update({
         nudge1_resend_id: null,
         nudge2_resend_id: null,
-        video_reminder_resend_id: videoReminderId ?? null,
       }).eq('id', applicantId)
     }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { isAdminAuthenticated } from '@/lib/auth'
-import { sendOnboardingEmail, sendNewApplicantNotification } from '@/lib/email'
+import { sendOnboardingEmail, sendRejectionEmail, sendNewApplicantNotification } from '@/lib/email'
 import { z } from 'zod'
 import type { Applicant } from '@/lib/types'
 
@@ -16,6 +16,7 @@ const patchSchema = z.object({
     'archived',
   ]).optional(),
   notes: z.string().optional(),
+  send_rejection_email: z.boolean().optional(),
 })
 
 interface RouteContext {
@@ -55,6 +56,17 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'Applicant not found' }, { status: 404 })
+
+    // Rejection email when explicitly requested
+    if (parsed.send_rejection_email) {
+      const job = data.jobs as { title: string } | null
+      const roleTitle = job?.title ?? 'the role'
+      try {
+        await sendRejectionEmail(data as unknown as Applicant, roleTitle)
+      } catch (e) {
+        console.error('[admin/applications/patch] rejection email failed:', e)
+      }
+    }
 
     // Trigger onboarding email when stage moves to accepted
     if (parsed.stage === 'accepted') {

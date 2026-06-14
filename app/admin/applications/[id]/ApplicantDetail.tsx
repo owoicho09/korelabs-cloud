@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { ExternalLink, Send, Archive, RefreshCw, CheckCircle } from 'lucide-react'
+import { ExternalLink, Send, Archive, RefreshCw, CheckCircle, Video, Copy, XCircle } from 'lucide-react'
 import { StageBadge, ScoreBadge } from '@/components/ui/Badge'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { PIPELINE_STAGES, STAGE_LABELS, type ApplicantStage } from '@/lib/types'
@@ -40,6 +40,7 @@ interface Applicant {
 
 interface Assessment {
   id: string
+  quiz_token: string | null
   score: number | null
   score_fundamentals: number | null
   score_applied: number | null
@@ -93,6 +94,7 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
   const [saving, setSaving] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [actionResult, setActionResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
   const job = applicant.jobs
 
   async function updateStage(newStage: ApplicantStage) {
@@ -155,6 +157,22 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
     }
   }
 
+  async function sendVideoInvite() {
+    setActionLoading('video')
+    setActionResult(null)
+    try {
+      const res = await fetch('/api/admin/trigger-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicant_id: applicant.id, type: 'video_reminder' }),
+      })
+      const json = await res.json()
+      setActionResult({ ok: res.ok, message: res.ok ? 'Video invite sent' : json.error ?? 'Failed' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   async function archiveApplicant() {
     setActionLoading('archive')
     setActionResult(null)
@@ -170,6 +188,33 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
     } finally {
       setActionLoading(null)
     }
+  }
+
+  async function rejectApplicant() {
+    setActionLoading('reject')
+    setActionResult(null)
+    try {
+      await fetch(`/api/admin/applications/${applicant.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: 'archived', send_rejection_email: true }),
+      })
+      setStage('archived')
+      setActionResult({ ok: true, message: 'Rejected and email sent' })
+      router.refresh()
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  function copyLink(type: 'quiz' | 'video') {
+    const token = assessment?.quiz_token
+    if (!token) return
+    const base = window.location.origin
+    const url = type === 'quiz' ? `${base}/quiz/${token}` : `${base}/video/${token}`
+    navigator.clipboard.writeText(url)
+    setCopied(type)
+    setTimeout(() => setCopied(null), 2000)
   }
 
   // Build timeline events
@@ -496,13 +541,53 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
           </button>
 
           <button
+            onClick={sendVideoInvite}
+            disabled={actionLoading === 'video'}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors disabled:opacity-50"
+          >
+            <Video size={14} />
+            Send video invite
+          </button>
+
+          <button
             onClick={archiveApplicant}
             disabled={actionLoading === 'archive' || stage === 'archived'}
             className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-red-400 hover:text-red-600 transition-colors disabled:opacity-50"
           >
             <Archive size={14} />
-            Archive
+            Archive (silent)
           </button>
+
+          <button
+            onClick={rejectApplicant}
+            disabled={actionLoading === 'reject' || stage === 'archived'}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+          >
+            <XCircle size={14} />
+            Reject (send email)
+          </button>
+
+          {assessment?.quiz_token && (
+            <div className="pt-2 border-t border-[#F0F7F3] space-y-1.5">
+              <p className="text-xs text-[#9FB5A9] font-medium">Copy links</p>
+              <button
+                onClick={() => copyLink('quiz')}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-[#D8E8E0] text-xs text-[#637A6F] hover:border-brand hover:text-brand transition-colors"
+              >
+                <Copy size={12} />
+                {copied === 'quiz' ? 'Copied!' : 'Copy quiz link'}
+              </button>
+              {assessment.completed_at && (
+                <button
+                  onClick={() => copyLink('video')}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-[#D8E8E0] text-xs text-[#637A6F] hover:border-brand hover:text-brand transition-colors"
+                >
+                  <Copy size={12} />
+                  {copied === 'video' ? 'Copied!' : 'Copy video link'}
+                </button>
+              )}
+            </div>
+          )}
 
           {actionResult && (
             <p className={`text-xs px-3 py-2 rounded-lg mt-2 ${actionResult.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>

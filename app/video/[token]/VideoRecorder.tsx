@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { CheckCircle, Video, RefreshCw, ChevronRight, Mic, MicOff } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 
@@ -15,6 +16,7 @@ interface Props {
   firstName: string
   roleTitle: string
   questions: Question[]
+  trackingToken?: string
 }
 
 type RecordingState = 'idle' | 'countdown' | 'recording' | 'preview' | 'uploading' | 'done_question'
@@ -38,7 +40,7 @@ function getSupportedMimeType(): string {
   return ''
 }
 
-export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Props) {
+export function VideoRecorder({ quizToken, firstName, roleTitle, questions, trackingToken }: Props) {
   const [started, setStarted] = useState(false)
   const [currentQ, setCurrentQ] = useState(0)
   const [recordingState, setRecordingState] = useState<RecordingState>('idle')
@@ -59,6 +61,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<BlobPart[]>([])
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const previewUrlRef = useRef<string | null>(null)
 
   const question = questions[currentQ]
   const isLastQuestion = currentQ === questions.length - 1
@@ -87,6 +90,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
     return () => {
       stopStream()
       if (timerRef.current) clearInterval(timerRef.current)
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
     }
   }, [stopStream])
 
@@ -120,7 +124,10 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
         return next
       })
       if (previewRef.current) {
-        previewRef.current.src = URL.createObjectURL(blob)
+        if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+        const url = URL.createObjectURL(blob)
+        previewUrlRef.current = url
+        previewRef.current.src = url
         previewRef.current.muted = false
       }
       setRecordingState('preview')
@@ -175,49 +182,62 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
     await startCountdown()
   }, [currentQ, startCamera, startCountdown])
 
+  const uploadBlob = useCallback(async (blob: Blob, questionIndex: number, duration: number | null) => {
+    if (blob.size === 0) throw new Error('Recording is empty. Please try again.')
+
+    // Step 1: get a presigned URL from the server (no file sent to Next.js)
+    const presignRes = await fetch('/api/video/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quiz_token: quizToken, question_index: questionIndex }),
+    })
+    if (!presignRes.ok) throw new Error('Could not get upload URL')
+    const { signedUrl } = await presignRes.json()
+
+    // Step 2: upload blob directly from browser to Supabase Storage — bypasses Next.js entirely
+    const uploadRes = await fetch(signedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': blob.type || 'video/webm' },
+      body: blob,
+    })
+    if (!uploadRes.ok) throw new Error('Storage upload failed')
+
+    // Step 3: confirm metadata only (tiny JSON, no file)
+    const confirmRes = await fetch('/api/video/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quiz_token: quizToken,
+        question_index: questionIndex,
+        duration_seconds: duration,
+      }),
+    })
+    if (!confirmRes.ok) throw new Error('Confirm failed')
+    return await confirmRes.json()
+  }, [quizToken])
+
   const uploadCurrent = useCallback(async () => {
     const blob = blobs[currentQ]
     if (!blob) return
 
     setRecordingState('uploading')
 
-    const fd = new FormData()
-    fd.append('quiz_token', quizToken)
-    fd.append('question_index', String(currentQ))
-    fd.append('video', blob, `q${currentQ}.webm`)
-    fd.append('duration_seconds', String(durations[currentQ] ?? 0))
-
     try {
-      const res = await fetch('/api/video/upload', { method: 'POST', body: fd })
-      if (!res.ok) throw new Error('Upload failed')
-      const json = await res.json()
-
-      if (json.complete || isLastQuestion) {
-        stopStream()
-        setAllDone(true)
-      } else {
-        setRecordingState('done_question')
-      }
-    } catch {
-      setError('Upload failed. Please try again.')
+      await uploadBlob(blob, currentQ, durations[currentQ] ?? null)
+      stopStream()
+      setAllDone(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed. Please try again.')
       setRecordingState('preview')
     }
-  }, [blobs, currentQ, durations, quizToken, isLastQuestion, stopStream])
+  }, [blobs, currentQ, durations, uploadBlob, stopStream])
 
   const nextQuestion = useCallback(async () => {
-    // Upload current before advancing
     if (!blobs[currentQ]) return
 
     setSubmitting(true)
-    const fd = new FormData()
-    fd.append('quiz_token', quizToken)
-    fd.append('question_index', String(currentQ))
-    fd.append('video', blobs[currentQ], `q${currentQ}.webm`)
-    fd.append('duration_seconds', String(durations[currentQ] ?? 0))
-
     try {
-      const res = await fetch('/api/video/upload', { method: 'POST', body: fd })
-      if (!res.ok) throw new Error('Upload failed')
+      await uploadBlob(blobs[currentQ], currentQ, durations[currentQ] ?? null)
       setCurrentQ((q) => q + 1)
       setRecordingState('idle')
       if (previewRef.current) previewRef.current.src = ''
@@ -226,7 +246,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
     } finally {
       setSubmitting(false)
     }
-  }, [blobs, currentQ, quizToken, durations])
+  }, [blobs, currentQ, durations, uploadBlob])
 
   const submitAll = useCallback(async () => {
     await uploadCurrent()
@@ -245,13 +265,12 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
           </h1>
           <p className="text-[#637A6F] mb-6">
             Record a short video introduction for the <strong className="text-[#1A2A1E]">{roleTitle}</strong> role.
-            You will answer 3 questions — up to 90 seconds each.
+            Record a short video response — up to 90 seconds.
           </p>
           <div className="space-y-3 mb-8">
             {[
-              `${questions.length} questions — up to 90 seconds each`,
-              'Record directly in your browser — no software needed',
-              'One retake allowed per question',
+              'Up to 90 seconds — no software or app needed',
+              'One retake allowed if you are not happy with your first take',
               'Your video is private and only seen by the hiring team',
             ].map((note) => (
               <div key={note} className="flex items-start gap-3 text-sm text-[#637A6F]">
@@ -277,9 +296,17 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
             <CheckCircle size={32} className="text-brand" />
           </div>
           <h2 className="font-display text-2xl text-[#1A2A1E] mb-3">Thank you, {firstName}.</h2>
-          <p className="text-[#637A6F]">
+          <p className="text-[#637A6F] mb-6">
             Our hiring team will review your application and be in touch if your profile matches what we are looking for.
           </p>
+          {trackingToken && (
+            <Link
+              href={`/apply/track/${trackingToken}`}
+              className="inline-flex items-center gap-2 text-sm text-brand hover:underline"
+            >
+              Track your application status
+            </Link>
+          )}
         </div>
       </div>
     )
@@ -292,7 +319,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
       <div className="sticky top-0 z-10 bg-white border-b border-[#D8E8E0]">
         <div className="max-w-2xl mx-auto px-4 flex items-center justify-between h-14">
           <span className="text-sm font-medium text-[#1A2A1E]">
-            Video introduction — Question {currentQ + 1} of {questions.length}
+            Video introduction
           </span>
           <div className="flex gap-1">
             {questions.map((_, i) => (
@@ -310,7 +337,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
       <div className="max-w-2xl mx-auto px-4 py-8">
         {/* Question text */}
         <div className="bg-white rounded-2xl border border-[#D8E8E0] p-6 mb-6">
-          <p className="text-xs text-[#9FB5A9] mb-2 uppercase tracking-wide font-medium">Question {currentQ + 1}</p>
+          <p className="text-xs text-[#9FB5A9] mb-2 uppercase tracking-wide font-medium">Your prompt</p>
           <p className="text-[17px] text-[#1A2A1E] leading-relaxed">{question.question}</p>
         </div>
 
@@ -428,7 +455,7 @@ export function VideoRecorder({ quizToken, firstName, roleTitle, questions }: Pr
                   loading={submitting}
                   className="flex items-center gap-2"
                 >
-                  Submit all videos
+                  Submit video
                   <CheckCircle size={16} />
                 </Button>
               )}
