@@ -618,6 +618,51 @@ export async function sendReminderEmail(
   await logEmail(applicant.id, applicant.email, subject, `reminder_${type}`, resendId, error)
 }
 
+// ─── Bulk custom email ────────────────────────────────────────────────────────
+
+export async function sendBulkCustomEmail(
+  applicants: Array<{ id: string; email: string; first_name: string; last_name: string }>,
+  subject: string,
+  bodyText: string
+): Promise<{ sent: number; errors: string[] }> {
+  const resend = getResend()
+  let sent = 0
+  const errors: string[] = []
+
+  for (const applicant of applicants) {
+    const personalizedSubject = subject
+      .replace(/\{first_name\}/g, applicant.first_name)
+      .replace(/\{last_name\}/g, applicant.last_name)
+    const personalizedBody = bodyText
+      .replace(/\{first_name\}/g, applicant.first_name)
+      .replace(/\{last_name\}/g, applicant.last_name)
+    const html = buildEmailHtml(`Hi ${applicant.first_name},`, personalizedBody)
+
+    let resendId: string | undefined
+    let error: string | undefined
+
+    if (resend) {
+      try {
+        const result = await resend.emails.send({
+          from: FROM,
+          to: applicant.email,
+          subject: personalizedSubject,
+          html,
+        })
+        resendId = result.data?.id
+        sent++
+      } catch (e) {
+        error = e instanceof Error ? e.message : 'Unknown error'
+        errors.push(`${applicant.email}: ${error}`)
+      }
+    }
+
+    await logEmail(applicant.id, applicant.email, personalizedSubject, 'bulk_custom', resendId, error)
+  }
+
+  return { sent, errors }
+}
+
 // ─── Resend cancellation helper ───────────────────────────────────────────────
 
 export async function cancelScheduledEmail(resendId: string): Promise<void> {

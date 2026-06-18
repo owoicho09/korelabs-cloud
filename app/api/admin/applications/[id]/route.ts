@@ -23,6 +23,36 @@ interface RouteContext {
   params: Promise<{ id: string }>
 }
 
+export async function GET(_req: Request, { params }: RouteContext) {
+  if (!(await isAdminAuthenticated())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { id } = await params
+  const db = getAdminClient()
+  if (!db) return NextResponse.json({ error: 'DB unavailable' }, { status: 503 })
+
+  const [{ data: applicant }, { data: assessment }, { data: emails }] = await Promise.all([
+    db.from('applicants')
+      .select('id, first_name, last_name, email, phone, location, why_korelabs, stage, notes, linkedin_url, github_url, portfolio_url, created_at, jobs(title, department)')
+      .eq('id', id)
+      .single(),
+    db.from('assessments')
+      .select('score, score_fundamentals, score_applied, score_korelabs, completed_at, quiz_token')
+      .eq('applicant_id', id)
+      .maybeSingle(),
+    db.from('email_log')
+      .select('subject, type, sent_at')
+      .eq('applicant_id', id)
+      .order('sent_at', { ascending: false })
+      .limit(5),
+  ])
+
+  if (!applicant) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  return NextResponse.json({ ...applicant, assessment, recent_emails: emails ?? [] })
+}
+
 export async function PATCH(req: Request, { params }: RouteContext) {
   if (!(await isAdminAuthenticated())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

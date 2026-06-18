@@ -19,6 +19,7 @@ import { StageBadge, ScoreBadge } from '@/components/ui/Badge'
 import { daysAgo } from '@/lib/utils'
 import type { ApplicantStage } from '@/lib/types'
 import { PIPELINE_STAGES, STAGE_LABELS } from '@/lib/types'
+import { RefreshCw, CheckCircle, Archive, Video, Send, Eye } from 'lucide-react'
 
 type KanbanApplicant = {
   id: string
@@ -40,18 +41,72 @@ interface Props {
 function KanbanCard({
   applicant,
   overlay = false,
+  onStageChange,
 }: {
   applicant: KanbanApplicant
   overlay?: boolean
+  onStageChange: (id: string, newStage: ApplicantStage) => void
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: applicant.id,
     data: { applicant },
   })
 
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [actionMsg, setActionMsg] = useState<string | null>(null)
+
   const days = daysAgo(applicant.updated_at)
   const isStuck = days > 10
   const isSlowing = days > 5 && !isStuck
+
+  async function cardAction(e: React.MouseEvent, action: string, stage?: string) {
+    e.stopPropagation()
+    setActionLoading(action)
+    setActionMsg(null)
+    try {
+      const res = await fetch('/api/admin/bulk-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicant_ids: [applicant.id], action, ...(stage ? { stage } : {}) }),
+      })
+      const json = await res.json()
+      if (res.ok) {
+        setActionMsg('✓')
+        if (stage) onStageChange(applicant.id, stage as ApplicantStage)
+        if (action === 'mark_accepted') onStageChange(applicant.id, 'accepted')
+        setTimeout(() => setActionMsg(null), 2000)
+      } else {
+        setActionMsg(json.error ?? '!')
+        setTimeout(() => setActionMsg(null), 3000)
+      }
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  async function sendToHM(e: React.MouseEvent) {
+    e.stopPropagation()
+    setActionLoading('hm')
+    setActionMsg(null)
+    try {
+      const res = await fetch('/api/admin/notify-hiring-manager', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicant_id: applicant.id }),
+      })
+      const json = await res.json()
+      if (res.ok) {
+        setActionMsg('✓')
+        onStageChange(applicant.id, 'under_review')
+        setTimeout(() => setActionMsg(null), 2000)
+      } else {
+        setActionMsg(json.error ?? '!')
+        setTimeout(() => setActionMsg(null), 3000)
+      }
+    } finally {
+      setActionLoading(null)
+    }
+  }
 
   return (
     <div
@@ -59,28 +114,97 @@ function KanbanCard({
       {...listeners}
       {...attributes}
       style={{ opacity: isDragging ? 0 : 1 }}
-      className={`mb-2 p-3 rounded-lg bg-white border cursor-grab active:cursor-grabbing select-none transition-shadow ${
-        overlay ? 'shadow-lg rotate-1' : 'hover:shadow-sm'
+      className={`group mb-2 p-3 rounded-lg bg-white border select-none transition-shadow ${
+        overlay ? 'shadow-lg rotate-1 cursor-grabbing' : 'hover:shadow-sm cursor-grab active:cursor-grabbing'
       } ${isStuck ? 'border-red-200' : isSlowing ? 'border-amber-200' : 'border-[#D8E8E0]'}`}
     >
       <Link
         href={`/admin/applications/${applicant.id}`}
         className="block"
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
-        <p className="font-medium text-[#1A2A1E] text-xs hover:text-brand transition-colors">
+        <p className="font-medium text-[#1A2A1E] text-xs hover:text-brand transition-colors leading-snug">
           {applicant.first_name} {applicant.last_name}
         </p>
       </Link>
-      <p className="text-[11px] text-[#9FB5A9] mt-0.5 truncate">
-        {applicant.jobs?.title ?? '—'}
-      </p>
+      <p className="text-[11px] text-[#9FB5A9] mt-0.5 truncate">{applicant.jobs?.title ?? '—'}</p>
+
       <div className="flex items-center justify-between mt-1.5">
         <ScoreBadge score={applicant.score} />
         <span className={`text-[10px] font-medium ${isStuck ? 'text-red-500' : isSlowing ? 'text-amber-500' : 'text-[#B0CBBC]'}`}>
           {days}d {isStuck ? '🔴' : isSlowing ? '🟡' : ''}
         </span>
       </div>
+
+      {/* Hover quick actions */}
+      {!overlay && (
+        <div
+          className="hidden group-hover:flex items-center gap-0.5 mt-2 pt-1.5 border-t border-[#F0F7F3]"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <Link
+            href={`/admin/applications/${applicant.id}`}
+            title="View profile"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex-1 flex items-center justify-center py-1 rounded hover:bg-[#EEF6F1] text-[#9FB5A9] hover:text-brand transition-colors"
+          >
+            <Eye size={11} />
+          </Link>
+          <button
+            title="Send to hiring manager"
+            disabled={!!actionLoading}
+            onClick={sendToHM}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex-1 flex items-center justify-center py-1 rounded hover:bg-[#EEF6F1] text-[#9FB5A9] hover:text-brand transition-colors disabled:opacity-40"
+          >
+            <Send size={11} />
+          </button>
+          <button
+            title="Re-send assessment"
+            disabled={!!actionLoading}
+            onClick={(e) => cardAction(e, 'resend_assessment')}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex-1 flex items-center justify-center py-1 rounded hover:bg-[#EEF6F1] text-[#9FB5A9] hover:text-brand transition-colors disabled:opacity-40"
+          >
+            <RefreshCw size={11} className={actionLoading === 'resend_assessment' ? 'animate-spin' : ''} />
+          </button>
+          <button
+            title="Send video invite"
+            disabled={!!actionLoading}
+            onClick={(e) => cardAction(e, 'send_video_invite')}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex-1 flex items-center justify-center py-1 rounded hover:bg-[#EEF6F1] text-[#9FB5A9] hover:text-brand transition-colors disabled:opacity-40"
+          >
+            <Video size={11} />
+          </button>
+          <button
+            title="Mark as accepted"
+            disabled={!!actionLoading}
+            onClick={(e) => cardAction(e, 'mark_accepted')}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex-1 flex items-center justify-center py-1 rounded hover:bg-emerald-50 text-[#9FB5A9] hover:text-emerald-600 transition-colors disabled:opacity-40"
+          >
+            <CheckCircle size={11} />
+          </button>
+          <button
+            title="Archive"
+            disabled={!!actionLoading}
+            onClick={(e) => cardAction(e, 'move_stage', 'archived')}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex-1 flex items-center justify-center py-1 rounded hover:bg-red-50 text-[#9FB5A9] hover:text-red-500 transition-colors disabled:opacity-40"
+          >
+            <Archive size={11} />
+          </button>
+        </div>
+      )}
+
+      {actionMsg && (
+        <p className={`text-[10px] mt-1 text-center ${actionMsg === '✓' ? 'text-emerald-600' : 'text-red-500'}`}>
+          {actionMsg}
+        </p>
+      )}
     </div>
   )
 }
@@ -90,16 +214,20 @@ function KanbanCard({
 function KanbanColumn({
   stage,
   applicants,
+  onStageChange,
 }: {
   stage: ApplicantStage
   applicants: KanbanApplicant[]
+  onStageChange: (id: string, newStage: ApplicantStage) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage })
 
   return (
     <div className="flex-shrink-0 w-56">
       <div className="flex items-center justify-between mb-3 px-1">
-        <StageBadge stage={stage} />
+        <div className="flex items-center gap-2">
+          <StageBadge stage={stage} />
+        </div>
         <span className="text-xs text-[#9FB5A9] font-medium">{applicants.length}</span>
       </div>
       <div
@@ -109,8 +237,17 @@ function KanbanColumn({
         }`}
       >
         {applicants.map((applicant) => (
-          <KanbanCard key={applicant.id} applicant={applicant} />
+          <KanbanCard
+            key={applicant.id}
+            applicant={applicant}
+            onStageChange={onStageChange}
+          />
         ))}
+        {applicants.length === 0 && (
+          <div className="flex items-center justify-center h-16 text-xs text-[#C5D9CE]">
+            Drop here
+          </div>
+        )}
       </div>
     </div>
   )
@@ -138,6 +275,22 @@ export function KanbanBoard({ initialColumns }: Props) {
     return null
   }
 
+  function onStageChange(cardId: string, newStage: ApplicantStage) {
+    const sourceStage = findStageOf(cardId)
+    if (!sourceStage || sourceStage === newStage) return
+
+    const sourceList = [...(columns[sourceStage] ?? [])]
+    const idx = sourceList.findIndex((a) => a.id === cardId)
+    if (idx === -1) return
+    const [moved] = sourceList.splice(idx, 1)
+
+    setColumns((prev) => ({
+      ...prev,
+      [sourceStage]: sourceList,
+      [newStage]: [{ ...moved, stage: newStage }, ...(prev[newStage] ?? [])],
+    }))
+  }
+
   function onDragStart({ active }: DragStartEvent) {
     setActiveCard((active.data.current?.applicant as KanbanApplicant) ?? null)
   }
@@ -152,19 +305,7 @@ export function KanbanBoard({ initialColumns }: Props) {
 
     if (!sourceStage || sourceStage === destStage) return
 
-    const sourceList = [...(columns[sourceStage] ?? [])]
-    const destList = [...(columns[destStage] ?? [])]
-    const cardIndex = sourceList.findIndex((a) => a.id === cardId)
-    if (cardIndex === -1) return
-
-    const [moved] = sourceList.splice(cardIndex, 1)
-    destList.unshift({ ...moved, stage: destStage })
-
-    setColumns((prev) => ({
-      ...prev,
-      [sourceStage]: sourceList,
-      [destStage]: destList,
-    }))
+    onStageChange(cardId, destStage)
 
     await fetch(`/api/admin/applications/${cardId}`, {
       method: 'PATCH',
@@ -174,25 +315,37 @@ export function KanbanBoard({ initialColumns }: Props) {
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-    >
-      <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: '60vh' }}>
-        {PIPELINE_STAGES.map((stage) => (
-          <KanbanColumn
-            key={stage}
-            stage={stage}
-            applicants={columns[stage] ?? []}
-          />
+    <div>
+      {/* Stage legend */}
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {PIPELINE_STAGES.map((s) => (
+          <div key={s} className="text-xs text-[#9FB5A9] flex items-center gap-1">
+            <span className="font-medium text-[#637A6F]">{columns[s]?.length ?? 0}</span> {STAGE_LABELS[s]}
+          </div>
         ))}
       </div>
 
-      <DragOverlay dropAnimation={null}>
-        {activeCard ? <KanbanCard applicant={activeCard} overlay /> : null}
-      </DragOverlay>
-    </DndContext>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+      >
+        <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: '60vh' }}>
+          {PIPELINE_STAGES.map((stage) => (
+            <KanbanColumn
+              key={stage}
+              stage={stage}
+              applicants={columns[stage] ?? []}
+              onStageChange={onStageChange}
+            />
+          ))}
+        </div>
+
+        <DragOverlay dropAnimation={null}>
+          {activeCard ? <KanbanCard applicant={activeCard} overlay onStageChange={onStageChange} /> : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
   )
 }

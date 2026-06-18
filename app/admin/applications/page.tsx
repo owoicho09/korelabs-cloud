@@ -2,6 +2,7 @@ import { getAdminClient } from '@/lib/supabase/admin'
 import type { ApplicantStage } from '@/lib/types'
 import { PIPELINE_STAGES, STAGE_LABELS } from '@/lib/types'
 import { ApplicationsTable } from './ApplicationsTable'
+import { StuckBanner } from './StuckBanner'
 
 export const revalidate = 0
 
@@ -22,7 +23,7 @@ async function getApplications(params: SearchParams) {
   let query = db
     .from('applicants')
     .select(`
-      id, first_name, last_name, email, stage, created_at, updated_at, location,
+      id, first_name, last_name, email, stage, created_at, updated_at, location, notes,
       jobs(title, department),
       assessments(score, completed_at)
     `)
@@ -48,20 +49,51 @@ async function getApplications(params: SearchParams) {
   let rows = (data ?? []).map((a) => {
     const assessment = (a.assessments as unknown as { score: number | null; completed_at: string | null }[] | null)?.[0] ?? null
     const jobData = (Array.isArray(a.jobs) ? a.jobs[0] : a.jobs) as { title: string; department: string } | null
-    return { ...a, jobs: jobData, score: assessment?.score ?? null, assessment_completed: !!assessment?.completed_at }
+    return { ...a, jobs: jobData, notes: (a as Record<string, unknown>).notes as string | null ?? null, score: assessment?.score ?? null, assessment_completed: !!assessment?.completed_at }
   })
 
-  // Score filtering (done in JS since it's a joined field)
   const scoreMin = params.score_min ? parseInt(params.score_min) : null
   const scoreMax = params.score_max ? parseInt(params.score_max) : null
   if (scoreMin !== null) rows = rows.filter((r) => r.score !== null && r.score >= scoreMin)
   if (scoreMax !== null) rows = rows.filter((r) => r.score !== null && r.score <= scoreMax)
 
-  // Score sort (done in JS)
   if (sort === 'score_desc') rows = rows.sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   if (sort === 'score_asc') rows = rows.sort((a, b) => (a.score ?? -1) - (b.score ?? -1))
 
   return rows
+}
+
+async function getStuckCounts() {
+  const db = getAdminClient()
+  const empty = { assessment_stuck: { count: 0, ids: [] as string[] }, video_pending: { count: 0, ids: [] as string[] } }
+  if (!db) return empty
+
+  const [{ data: assessmentRows }, { data: videoRows }] = await Promise.all([
+    db.from('applicants').select('id, assessments(completed_at)').eq('stage', 'assessment_sent'),
+    db.from('applicants')
+      .select('id, assessments(completed_at), videos(id)')
+      .not('stage', 'in', '("received","assessment_video_done","accepted","archived")'),
+  ])
+
+  const assessmentStuckIds = (assessmentRows ?? [])
+    .filter((a) => {
+      const asses = a.assessments as { completed_at: string | null }[] | null
+      return !asses?.some((x) => x.completed_at)
+    })
+    .map((a) => a.id)
+
+  const videoPendingIds = (videoRows ?? [])
+    .filter((a) => {
+      const asses = a.assessments as { completed_at: string | null }[] | null
+      const vids = a.videos as { id: string }[] | null
+      return asses?.some((x) => x.completed_at) && !(vids?.length)
+    })
+    .map((a) => a.id)
+
+  return {
+    assessment_stuck: { count: assessmentStuckIds.length, ids: assessmentStuckIds },
+    video_pending: { count: videoPendingIds.length, ids: videoPendingIds },
+  }
 }
 
 interface Props {
@@ -70,7 +102,10 @@ interface Props {
 
 export default async function ApplicationsPage({ searchParams }: Props) {
   const params = await searchParams
-  const applications = await getApplications(params)
+  const [applications, stuckCounts] = await Promise.all([
+    getApplications(params),
+    getStuckCounts(),
+  ])
 
   const page = parseInt(params.page ?? '1')
   const perPage = 50
@@ -85,6 +120,8 @@ export default async function ApplicationsPage({ searchParams }: Props) {
           <p className="text-sm text-[#637A6F] mt-1">{applications.length} total</p>
         </div>
       </div>
+
+      <StuckBanner initial={stuckCounts} />
 
       <ApplicationsTable
         applications={paged}
