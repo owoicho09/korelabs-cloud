@@ -1,14 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ExternalLink, Send, Archive, RefreshCw, CheckCircle, Video, Copy, XCircle, Mail, X, PauseCircle } from 'lucide-react'
+import {
+  ExternalLink, Send, Archive, RefreshCw, CheckCircle, Video, Copy,
+  XCircle, Mail, X, PauseCircle, Clapperboard, AlertTriangle, Loader2,
+} from 'lucide-react'
+import { OfferTab } from './OfferTab'
 import { StageBadge, ScoreBadge } from '@/components/ui/Badge'
 import { formatDate, formatDateTime } from '@/lib/utils'
 import { PIPELINE_STAGES, STAGE_LABELS, type ApplicantStage } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 
-type Tab = 'application' | 'cv' | 'assessment' | 'videos' | 'timeline' | 'notes'
+type Tab = 'application' | 'cv' | 'assessment' | 'videos' | 'timeline' | 'notes' | 'offer'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'application', label: 'Application' },
@@ -17,6 +21,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'videos', label: 'Videos' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'notes', label: 'Notes' },
+  { id: 'offer', label: 'Offer' },
 ]
 
 interface Applicant {
@@ -92,9 +97,23 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
   const [stage, setStage] = useState<ApplicantStage>(applicant.stage)
   const [notes, setNotes] = useState(applicant.notes ?? '')
   const [saving, setSaving] = useState(false)
+  const [stageSaving, setStageSaving] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [actionResult, setActionResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+
+  // Toast
+  const [toast, setToast] = useState<{ message: string; ok: boolean } | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function showToast(message: string, ok = true) {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast({ message, ok })
+    toastTimer.current = setTimeout(() => setToast(null), 4000)
+  }
+
+  // Confirmation for destructive / impactful actions
+  const [pendingConfirm, setPendingConfirm] = useState<'archive' | 'reject' | 'accept' | null>(null)
+  const [confirmLoading, setConfirmLoading] = useState(false)
 
   // Custom email composer
   const [emailOpen, setEmailOpen] = useState(false)
@@ -104,35 +123,45 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
 
   const job = applicant.jobs
 
-  function setResult(ok: boolean, message: string) {
-    setActionResult({ ok, message })
-  }
-
   async function updateStage(newStage: ApplicantStage) {
+    const prev = stage
     setStage(newStage)
-    setSaving(true)
-    await fetch(`/api/admin/applications/${applicant.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage: newStage }),
-    })
-    setSaving(false)
-    router.refresh()
+    setStageSaving(true)
+    try {
+      const res = await fetch(`/api/admin/applications/${applicant.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: newStage }),
+      })
+      if (res.ok) {
+        showToast(`Stage → ${STAGE_LABELS[newStage]}`)
+        router.refresh()
+      } else {
+        const d = await res.json()
+        showToast(d.error ?? 'Failed to update stage', false)
+        setStage(prev)
+      }
+    } finally {
+      setStageSaving(false)
+    }
   }
 
   async function saveNotes() {
     setSaving(true)
-    await fetch(`/api/admin/applications/${applicant.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notes }),
-    })
-    setSaving(false)
+    try {
+      await fetch(`/api/admin/applications/${applicant.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes }),
+      })
+      showToast('Notes saved')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function sendToHiringManager() {
     setActionLoading('hm')
-    setActionResult(null)
     try {
       const res = await fetch('/api/admin/notify-hiring-manager', {
         method: 'POST',
@@ -141,11 +170,11 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
       })
       const json = await res.json()
       if (res.ok) {
-        setResult(true, 'Sent to hiring manager')
+        showToast('Sent to hiring manager')
         setStage('under_review')
         router.refresh()
       } else {
-        setResult(false, json.error ?? 'Failed')
+        showToast(json.error ?? 'Failed', false)
       }
     } finally {
       setActionLoading(null)
@@ -154,7 +183,6 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
 
   async function resendAssessment() {
     setActionLoading('assessment')
-    setActionResult(null)
     try {
       const res = await fetch('/api/admin/trigger-email', {
         method: 'POST',
@@ -162,7 +190,8 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
         body: JSON.stringify({ applicant_id: applicant.id, type: 'send_assessment' }),
       })
       const json = await res.json()
-      setResult(res.ok, res.ok ? 'Assessment email sent' : json.error ?? 'Failed')
+      showToast(res.ok ? (json.detail ?? 'Assessment email sent') : (json.error ?? 'Failed'), res.ok)
+      if (res.ok) router.refresh()
     } finally {
       setActionLoading(null)
     }
@@ -170,7 +199,6 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
 
   async function sendVideoInvite() {
     setActionLoading('video')
-    setActionResult(null)
     try {
       const res = await fetch('/api/admin/trigger-email', {
         method: 'POST',
@@ -178,50 +206,69 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
         body: JSON.stringify({ applicant_id: applicant.id, type: 'video_reminder' }),
       })
       const json = await res.json()
-      setResult(res.ok, res.ok ? 'Video invite sent' : json.error ?? 'Failed')
+      showToast(res.ok ? 'Video invite sent' : (json.error ?? 'Failed'), res.ok)
     } finally {
       setActionLoading(null)
     }
   }
 
-  async function archiveApplicant() {
-    setActionLoading('archive')
-    setActionResult(null)
+  async function doArchive() {
+    setConfirmLoading(true)
     try {
-      await fetch(`/api/admin/applications/${applicant.id}`, {
+      const res = await fetch(`/api/admin/applications/${applicant.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage: 'archived' }),
       })
-      setStage('archived')
-      setResult(true, 'Applicant archived')
-      router.refresh()
+      if (res.ok) {
+        setStage('archived')
+        showToast('Applicant archived')
+        router.refresh()
+      } else {
+        const d = await res.json()
+        showToast(d.error ?? 'Archive failed', false)
+      }
     } finally {
-      setActionLoading(null)
+      setConfirmLoading(false)
+      setPendingConfirm(null)
     }
   }
 
-  async function rejectApplicant() {
-    setActionLoading('reject')
-    setActionResult(null)
+  async function doReject() {
+    setConfirmLoading(true)
     try {
-      await fetch(`/api/admin/applications/${applicant.id}`, {
+      const res = await fetch(`/api/admin/applications/${applicant.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage: 'archived', send_rejection_email: true }),
       })
-      setStage('archived')
-      setResult(true, 'Rejected and email sent')
-      router.refresh()
+      if (res.ok) {
+        setStage('archived')
+        showToast('Rejected — email sent')
+        router.refresh()
+      } else {
+        const d = await res.json()
+        showToast(d.error ?? 'Rejection failed', false)
+      }
     } finally {
-      setActionLoading(null)
+      setConfirmLoading(false)
+      setPendingConfirm(null)
+    }
+  }
+
+  async function doAccept() {
+    setConfirmLoading(true)
+    try {
+      await updateStage('accepted')
+    } finally {
+      setConfirmLoading(false)
+      setPendingConfirm(null)
     }
   }
 
   async function sendCustomEmail() {
     if (!emailSubject.trim() || !emailBody.trim()) return
     setEmailSending(true)
-    setActionResult(null)
     try {
       const res = await fetch('/api/admin/bulk-email', {
         method: 'POST',
@@ -230,13 +277,13 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
       })
       const json = await res.json()
       if (res.ok) {
-        setResult(true, 'Email sent')
+        showToast('Email sent')
         setEmailOpen(false)
         setEmailSubject('')
         setEmailBody('')
         router.refresh()
       } else {
-        setResult(false, json.error ?? 'Failed')
+        showToast(json.error ?? 'Failed', false)
       }
     } finally {
       setEmailSending(false)
@@ -258,14 +305,28 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
     assessment?.started_at ? { time: assessment.started_at, label: 'Started assessment', color: 'default' } : null,
     assessment?.completed_at ? { time: assessment.completed_at, label: 'Completed assessment', color: 'success' } : null,
     ...videoData.map((v) => ({ time: v.created_at, label: `Uploaded video — Q${v.question_index + 1}`, color: 'success' })),
-    ...emails.map((e) => ({ time: e.sent_at, label: `Email sent: ${e.type.replace(/_/g, ' ')}`, color: 'muted', subject: e.subject })),
+    ...emails.map((e) => ({ time: e.sent_at, label: `Email: ${e.type.replace(/_/g, ' ')}`, color: 'muted', subject: e.subject })),
   ].filter(Boolean).sort((a, b) => new Date(b!.time).getTime() - new Date(a!.time).getTime()) as Array<{ time: string; label: string; color: string; subject?: string }>
+
+  const confirmText = {
+    archive: 'Archive this applicant silently (no email sent)?',
+    reject: 'Send a rejection email and archive this applicant? This cannot be undone.',
+    accept: 'This sends a generic welcome email — not formal offer documents. Use the Offer tab to send a proper offer letter with attachments. Proceed anyway?',
+  }
 
   return (
     <div className="grid lg:grid-cols-3 gap-6">
-      {/* Main */}
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl text-white text-sm max-w-xs ${toast.ok ? 'bg-[#1A2A1E]' : 'bg-red-600'}`}>
+          <span className="flex-1">{toast.message}</span>
+          <button onClick={() => setToast(null)} className="opacity-60 hover:opacity-100 shrink-0"><X size={14} /></button>
+        </div>
+      )}
+
+      {/* ── Main ───────────────────────────────────────────────────────────────── */}
       <div className="lg:col-span-2 space-y-4">
-        {/* Header */}
+        {/* Header card */}
         <div className="bg-white rounded-xl border border-[#D8E8E0] p-6">
           <div className="flex items-start justify-between mb-2">
             <div>
@@ -278,9 +339,23 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
             </div>
             <StageBadge stage={stage} />
           </div>
+
           {assessment?.score !== null && assessment?.score !== undefined && (
             <div className="mt-2">
               <ScoreBadge score={assessment.score} />
+            </div>
+          )}
+
+          {(stage === 'assessment_video_done' || videoData.length > 0) && (
+            <div className={`mt-2 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
+              videoData.length > 0
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'bg-red-50 text-red-600 border border-red-200'
+            }`}>
+              <Clapperboard size={11} />
+              {videoData.length > 0
+                ? `${videoData.length} video${videoData.length !== 1 ? 's' : ''} recorded`
+                : 'No videos — mislabelled stage'}
             </div>
           )}
         </div>
@@ -300,14 +375,18 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
                 {id === 'videos' && videoData.length > 0 && (
                   <span className="ml-1.5 text-xs bg-brand text-white rounded-full px-1.5 py-0.5">{videoData.length}</span>
                 )}
-                {id === 'timeline' && emails.length > 0 && (
+                {id === 'timeline' && timelineEvents.length > 0 && (
                   <span className="ml-1.5 text-xs bg-[#D8E8E0] text-[#637A6F] rounded-full px-1.5 py-0.5">{timelineEvents.length}</span>
+                )}
+                {id === 'offer' && (
+                  <span className="ml-1.5 inline-flex items-center text-xs bg-emerald-50 text-emerald-700 rounded-full px-1.5 py-0.5 border border-emerald-200">Send</span>
                 )}
               </button>
             ))}
           </div>
 
           <div className="p-6">
+            {/* ── Application ── */}
             {tab === 'application' && (
               <div className="space-y-5">
                 <div className="grid sm:grid-cols-2 gap-4 text-sm">
@@ -348,6 +427,7 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
               </div>
             )}
 
+            {/* ── CV ── */}
             {tab === 'cv' && (
               <div>
                 {cvSignedUrl ? (
@@ -366,6 +446,7 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
               </div>
             )}
 
+            {/* ── Assessment ── */}
             {tab === 'assessment' && (
               <div>
                 {!assessment ? (
@@ -429,6 +510,7 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
               </div>
             )}
 
+            {/* ── Videos ── */}
             {tab === 'videos' && (
               <div>
                 {videoData.length === 0 ? (
@@ -452,6 +534,7 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
               </div>
             )}
 
+            {/* ── Timeline ── */}
             {tab === 'timeline' && (
               <div>
                 {timelineEvents.length === 0 ? (
@@ -476,6 +559,7 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
               </div>
             )}
 
+            {/* ── Notes ── */}
             {tab === 'notes' && (
               <div>
                 <textarea
@@ -492,16 +576,27 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
                 </div>
               </div>
             )}
+
+            {/* ── Offer ── */}
+            {tab === 'offer' && (
+              <OfferTab
+                applicantId={applicant.id}
+                onSent={() => setStage('accepted')}
+              />
+            )}
           </div>
         </div>
       </div>
 
-      {/* Sidebar */}
+      {/* ── Sidebar ─────────────────────────────────────────────────────────────── */}
       <div className="space-y-4">
         {/* Stage selector */}
         <div className="bg-white rounded-xl border border-[#D8E8E0] p-5">
-          <h3 className="font-medium text-[#1A2A1E] text-sm mb-3">Stage</h3>
-          <div className="space-y-1 mb-3">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-medium text-[#1A2A1E] text-sm">Stage</h3>
+            {stageSaving && <Loader2 size={13} className="animate-spin text-[#9FB5A9]" />}
+          </div>
+          <div className={`space-y-1 ${stageSaving ? 'pointer-events-none opacity-60' : ''}`}>
             {PIPELINE_STAGES.map((s) => (
               <label
                 key={s}
@@ -515,34 +610,60 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
               </label>
             ))}
           </div>
-          {saving && <p className="text-xs text-[#9FB5A9]">Saving…</p>}
         </div>
 
         {/* Actions */}
         <div className="bg-white rounded-xl border border-[#D8E8E0] p-5 space-y-2">
           <h3 className="font-medium text-[#1A2A1E] text-sm mb-3">Actions</h3>
 
-          <button onClick={sendToHiringManager} disabled={actionLoading === 'hm'} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#1A2A1E] hover:border-brand hover:text-brand transition-colors disabled:opacity-50">
-            <Send size={14} /> Send to hiring manager
+          <button
+            onClick={sendToHiringManager}
+            disabled={actionLoading === 'hm'}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#1A2A1E] hover:border-brand hover:text-brand transition-colors disabled:opacity-50"
+          >
+            {actionLoading === 'hm' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            Send to hiring manager
           </button>
 
-          <button onClick={() => updateStage('accepted')} disabled={stage === 'accepted'} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#1A2A1E] hover:border-emerald-500 hover:text-emerald-600 transition-colors disabled:opacity-50">
+          <button
+            onClick={() => setPendingConfirm('accept')}
+            disabled={stage === 'accepted' || !!pendingConfirm}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#1A2A1E] hover:border-emerald-500 hover:text-emerald-600 transition-colors disabled:opacity-50"
+          >
             <CheckCircle size={14} /> Mark as accepted
           </button>
 
-          <button onClick={() => updateStage('on_hold')} disabled={stage === 'on_hold'} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-amber-400 hover:text-amber-600 transition-colors disabled:opacity-50">
+          <button
+            onClick={() => updateStage('on_hold')}
+            disabled={stage === 'on_hold' || stageSaving}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-amber-400 hover:text-amber-600 transition-colors disabled:opacity-50"
+          >
             <PauseCircle size={14} /> Put on hold
           </button>
 
-          <button onClick={resendAssessment} disabled={actionLoading === 'assessment'} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors disabled:opacity-50">
-            <RefreshCw size={14} /> Re-send assessment
+          <button
+            onClick={resendAssessment}
+            disabled={actionLoading === 'assessment'}
+            title="Sends assessment email immediately. Stage is not reset if applicant is past assessment_sent."
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors disabled:opacity-50"
+          >
+            {actionLoading === 'assessment' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            Re-send assessment
           </button>
 
-          <button onClick={sendVideoInvite} disabled={actionLoading === 'video'} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors disabled:opacity-50">
-            <Video size={14} /> Send video invite
+          <button
+            onClick={sendVideoInvite}
+            disabled={actionLoading === 'video'}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors disabled:opacity-50"
+          >
+            {actionLoading === 'video' ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
+            Send video invite
           </button>
 
-          <button onClick={() => setEmailOpen((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors">
+          <button
+            onClick={() => setEmailOpen((v) => !v)}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors"
+          >
             <Mail size={14} /> {emailOpen ? 'Close email' : 'Send custom email'}
           </button>
 
@@ -574,21 +695,60 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
                 disabled={emailSending || !emailSubject.trim() || !emailBody.trim()}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-brand text-white text-xs font-medium rounded-lg hover:bg-brand/90 transition-colors disabled:opacity-50"
               >
-                <Send size={12} />
+                {emailSending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
                 {emailSending ? 'Sending…' : 'Send email'}
               </button>
             </div>
           )}
 
           <div className="border-t border-[#F0F7F3] pt-2 space-y-2">
-            <button onClick={archiveApplicant} disabled={actionLoading === 'archive' || stage === 'archived'} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-red-400 hover:text-red-600 transition-colors disabled:opacity-50">
+            <button
+              onClick={() => setPendingConfirm('archive')}
+              disabled={!!pendingConfirm || stage === 'archived'}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-red-400 hover:text-red-600 transition-colors disabled:opacity-50"
+            >
               <Archive size={14} /> Archive (silent)
             </button>
 
-            <button onClick={rejectApplicant} disabled={actionLoading === 'reject' || stage === 'archived'} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-red-500 hover:text-red-700 transition-colors disabled:opacity-50">
+            <button
+              onClick={() => setPendingConfirm('reject')}
+              disabled={!!pendingConfirm || stage === 'archived'}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#D8E8E0] text-sm text-[#637A6F] hover:border-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+            >
               <XCircle size={14} /> Reject (send email)
             </button>
           </div>
+
+          {/* Confirmation dialog */}
+          {pendingConfirm && (
+            <div className="mt-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200">
+              <div className="flex items-start gap-2 mb-3">
+                <AlertTriangle size={13} className="text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800 leading-snug">{confirmText[pendingConfirm]}</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    if (pendingConfirm === 'archive') doArchive()
+                    else if (pendingConfirm === 'reject') doReject()
+                    else if (pendingConfirm === 'accept') doAccept()
+                  }}
+                  disabled={confirmLoading}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-[#1A2A1E] text-white hover:bg-[#2A3A2E] transition-colors disabled:opacity-50"
+                >
+                  {confirmLoading && <Loader2 size={11} className="animate-spin" />}
+                  Confirm
+                </button>
+                <button
+                  onClick={() => setPendingConfirm(null)}
+                  disabled={confirmLoading}
+                  className="flex-1 text-xs px-3 py-2 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {assessment?.quiz_token && (
             <div className="border-t border-[#F0F7F3] pt-2 space-y-1.5">
@@ -603,42 +763,47 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
               )}
             </div>
           )}
-
-          {actionResult && (
-            <p className={`text-xs px-3 py-2 rounded-lg ${actionResult.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-              {actionResult.message}
-            </p>
-          )}
         </div>
 
         {/* Score summary */}
-        {assessment?.score !== null && assessment?.score !== undefined && (
+        {assessment && (
           <div className="bg-white rounded-xl border border-[#D8E8E0] p-5">
-            <h3 className="font-medium text-[#1A2A1E] text-sm mb-3">Score summary</h3>
-            <div className="space-y-2">
-              {[
-                { label: 'Total', value: assessment.score, max: 36 },
-                { label: 'Fundamentals', value: assessment.score_fundamentals, max: 8 },
-                { label: 'Applied', value: assessment.score_applied, max: 16 },
-                { label: 'KoreLabs', value: assessment.score_korelabs, max: 12 },
-              ].map(({ label, value, max }) => (
-                <div key={label}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-[#637A6F]">{label}</span>
-                    <span className="font-medium text-[#1A2A1E]">{value ?? '—'}/{max}</span>
-                  </div>
-                  {value !== null && (
-                    <div className="h-1 rounded-full bg-[#D8E8E0] overflow-hidden">
-                      <div className="h-full rounded-full bg-brand" style={{ width: `${(value / max) * 100}%` }} />
+            <h3 className="font-medium text-[#1A2A1E] text-sm mb-3">
+              {assessment.score !== null ? 'Score summary' : 'Assessment'}
+            </h3>
+
+            {assessment.score !== null ? (
+              <div className="space-y-2">
+                {[
+                  { label: 'Total', value: assessment.score, max: 36 },
+                  { label: 'Fundamentals', value: assessment.score_fundamentals, max: 8 },
+                  { label: 'Applied', value: assessment.score_applied, max: 16 },
+                  { label: 'KoreLabs', value: assessment.score_korelabs, max: 12 },
+                ].map(({ label, value, max }) => (
+                  <div key={label}>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-[#637A6F]">{label}</span>
+                      <span className="font-medium text-[#1A2A1E]">{value ?? '—'}/{max}</span>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                    {value !== null && (
+                      <div className="h-1 rounded-full bg-[#D8E8E0] overflow-hidden">
+                        <div className="h-full rounded-full bg-brand" style={{ width: `${(value / max) * 100}%` }} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <p className={`text-xs font-medium mt-3 ${assessment.completed_at ? 'text-emerald-700' : 'text-amber-600'}`}>
+              {assessment.completed_at
+                ? `Quiz completed ${formatDate(assessment.completed_at)}`
+                : 'Quiz not yet submitted'}
+            </p>
           </div>
         )}
 
-        {/* Recent email log */}
+        {/* Email history */}
         {emails.length > 0 && (
           <div className="bg-white rounded-xl border border-[#D8E8E0] p-5">
             <h3 className="font-medium text-[#1A2A1E] text-sm mb-3">Email history</h3>
@@ -650,7 +815,9 @@ export function ApplicantDetail({ applicant, assessment, emails, videoData, quiz
                 </div>
               ))}
               {emails.length > 8 && (
-                <p className="text-xs text-[#9FB5A9]">+{emails.length - 8} more (see Timeline tab)</p>
+                <button onClick={() => setTab('timeline')} className="text-xs text-brand hover:underline">
+                  +{emails.length - 8} more — see Timeline
+                </button>
               )}
             </div>
           </div>

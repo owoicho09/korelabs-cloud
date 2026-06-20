@@ -103,7 +103,7 @@ export default async function ApplicantPage({ params }: Props) {
   if (!data) notFound()
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <Link href="/admin/applications" className="inline-flex items-center gap-2 text-sm text-[#637A6F] hover:text-[#1A2A1E] mb-6">
         <ArrowLeft size={14} />
         All applications

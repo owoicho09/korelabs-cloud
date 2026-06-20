@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
+import { useState, useEffect, useTransition, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { StageBadge, ScoreBadge } from '@/components/ui/Badge'
@@ -10,7 +10,7 @@ import { STAGE_LABELS, PIPELINE_STAGES } from '@/lib/types'
 import {
   Filter, Send, ChevronLeft, ChevronRight,
   CheckCircle, PauseCircle, RefreshCw, Video, Mail, X, Users,
-  Download, XCircle, Eye, StickyNote,
+  Download, XCircle, Eye, StickyNote, Search,
 } from 'lucide-react'
 import { ApplicantSlideOver } from './ApplicantSlideOver'
 
@@ -59,6 +59,7 @@ interface Application {
   notes: string | null
   score: number | null
   assessment_completed: boolean
+  video_count: number
   jobs: { title: string; department: string } | null
 }
 
@@ -89,6 +90,16 @@ export function ApplicationsTable({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
+  const [searchValue, setSearchValue] = useState(currentParams.search ?? '')
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function handleSearch(value: string) {
+    setSearchValue(value)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => {
+      navigate({ search: value.trim() || undefined })
+    }, 400)
+  }
 
   // Slide-over preview
   const [previewId, setPreviewId] = useState<string | null>(null)
@@ -353,6 +364,18 @@ export function ApplicationsTable({
 
       {/* Filters */}
       <div className="mb-4 flex items-center gap-3 flex-wrap">
+        {/* Always-visible search */}
+        <div className="relative flex-1 min-w-[160px] max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9FB5A9] pointer-events-none" />
+          <input
+            type="text"
+            value={searchValue}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search name or email…"
+            className="w-full pl-8 pr-3 py-2 rounded-lg border border-[#D8E8E0] bg-white text-sm text-[#1A2A1E] placeholder:text-[#C5D9CE] focus:outline-none focus:border-brand"
+          />
+        </div>
+
         <button
           onClick={() => setShowFilters((v) => !v)}
           className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#D8E8E0] bg-white text-sm text-[#637A6F] hover:border-brand hover:text-brand transition-colors"
@@ -390,7 +413,10 @@ export function ApplicationsTable({
 
         {(currentParams.stage || currentParams.score_min || currentParams.score_max || currentParams.search) && (
           <button
-            onClick={() => navigate({ stage: undefined, score_min: undefined, score_max: undefined, search: undefined })}
+            onClick={() => {
+              setSearchValue('')
+              navigate({ stage: undefined, score_min: undefined, score_max: undefined, search: undefined })
+            }}
             className="text-xs text-[#9FB5A9] hover:text-red-500 transition-colors"
           >
             Clear filters
@@ -429,15 +455,6 @@ export function ApplicationsTable({
                 className="w-16 px-2 py-1.5 text-sm rounded-lg border border-[#D8E8E0] focus:outline-none focus:border-brand"
               />
             </div>
-          </div>
-          <div>
-            <label className="text-xs text-[#9FB5A9] block mb-1">Search</label>
-            <input
-              type="text" placeholder="Name or email"
-              defaultValue={currentParams.search}
-              onBlur={(e) => navigate({ search: e.target.value || undefined })}
-              className="px-3 py-1.5 text-sm rounded-lg border border-[#D8E8E0] focus:outline-none focus:border-brand"
-            />
           </div>
         </div>
       )}
@@ -570,6 +587,12 @@ export function ApplicationsTable({
                       </td>
                       <td className="px-4 py-3.5">
                         <StageBadge stage={a.stage} />
+                        {a.stage === 'assessment_video_done' && (
+                          <div className={`flex items-center gap-0.5 text-[10px] font-medium mt-0.5 ${a.video_count > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                            <Video size={9} />
+                            {a.video_count > 0 ? `${a.video_count} video${a.video_count !== 1 ? 's' : ''}` : 'no videos ⚠'}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 hidden lg:table-cell">
                         <ScoreBadge score={a.score} />

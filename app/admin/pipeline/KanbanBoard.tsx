@@ -30,6 +30,7 @@ type KanbanApplicant = {
   updated_at: string
   score: number | null
   jobs: { title: string } | null
+  video_count: number
 }
 
 interface Props {
@@ -136,6 +137,15 @@ function KanbanCard({
           {days}d {isStuck ? '🔴' : isSlowing ? '🟡' : ''}
         </span>
       </div>
+
+      {applicant.stage === 'assessment_video_done' && (
+        <div className={`flex items-center gap-0.5 text-[9px] font-medium mt-1 ${applicant.video_count > 0 ? 'text-emerald-500' : 'text-orange-500'}`}>
+          <Video size={8} />
+          {applicant.video_count > 0
+            ? `${applicant.video_count} video${applicant.video_count > 1 ? 's' : ''}`
+            : 'no videos ⚠'}
+        </div>
+      )}
 
       {/* Hover quick actions */}
       {!overlay && (

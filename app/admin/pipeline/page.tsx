@@ -14,7 +14,8 @@ async function getPipelineData() {
     .select(`
       id, first_name, last_name, stage, created_at, updated_at,
       jobs(title),
-      assessments(score)
+      assessments(score),
+      videos(id)
     `)
     .order('created_at', { ascending: false })
 
@@ -25,6 +26,7 @@ async function getPipelineData() {
       .map((a) => ({
         ...a,
         score: ((a.assessments as { score: number | null }[] | null)?.[0]?.score) ?? null,
+        video_count: (a.videos as { id: string }[] | null)?.length ?? 0,
       }))
   }
 

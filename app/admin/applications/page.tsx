@@ -25,7 +25,8 @@ async function getApplications(params: SearchParams) {
     .select(`
       id, first_name, last_name, email, stage, created_at, updated_at, location, notes,
       jobs(title, department),
-      assessments(score, completed_at)
+      assessments(score, completed_at),
+      videos(id)
     `)
 
   if (params.stage && PIPELINE_STAGES.includes(params.stage as ApplicantStage)) {
@@ -49,7 +50,8 @@ async function getApplications(params: SearchParams) {
   let rows = (data ?? []).map((a) => {
     const assessment = (a.assessments as unknown as { score: number | null; completed_at: string | null }[] | null)?.[0] ?? null
     const jobData = (Array.isArray(a.jobs) ? a.jobs[0] : a.jobs) as { title: string; department: string } | null
-    return { ...a, jobs: jobData, notes: (a as Record<string, unknown>).notes as string | null ?? null, score: assessment?.score ?? null, assessment_completed: !!assessment?.completed_at }
+    const videoCount = (a.videos as { id: string }[] | null)?.length ?? 0
+    return { ...a, jobs: jobData, notes: (a as Record<string, unknown>).notes as string | null ?? null, score: assessment?.score ?? null, assessment_completed: !!assessment?.completed_at, video_count: videoCount }
   })
 
   const scoreMin = params.score_min ? parseInt(params.score_min) : null
@@ -65,14 +67,21 @@ async function getApplications(params: SearchParams) {
 
 async function getStuckCounts() {
   const db = getAdminClient()
-  const empty = { assessment_stuck: { count: 0, ids: [] as string[] }, video_pending: { count: 0, ids: [] as string[] } }
+  const empty = {
+    assessment_stuck: { count: 0, ids: [] as string[] },
+    video_pending: { count: 0, ids: [] as string[] },
+    mislabelled_video: { count: 0, ids: [] as string[] },
+  }
   if (!db) return empty
 
-  const [{ data: assessmentRows }, { data: videoRows }] = await Promise.all([
+  const [{ data: assessmentRows }, { data: videoRows }, { data: mislabelledRows }] = await Promise.all([
     db.from('applicants').select('id, assessments(completed_at)').eq('stage', 'assessment_sent'),
     db.from('applicants')
       .select('id, assessments(completed_at), videos(id)')
       .not('stage', 'in', '("received","assessment_video_done","accepted","archived")'),
+    db.from('applicants')
+      .select('id, videos(id)')
+      .eq('stage', 'assessment_video_done'),
   ])
 
   const assessmentStuckIds = (assessmentRows ?? [])
@@ -90,9 +99,17 @@ async function getStuckCounts() {
     })
     .map((a) => a.id)
 
+  const mislabelledIds = (mislabelledRows ?? [])
+    .filter((a) => {
+      const vids = a.videos as { id: string }[] | null
+      return !(vids?.length)
+    })
+    .map((a) => a.id)
+
   return {
     assessment_stuck: { count: assessmentStuckIds.length, ids: assessmentStuckIds },
     video_pending: { count: videoPendingIds.length, ids: videoPendingIds },
+    mislabelled_video: { count: mislabelledIds.length, ids: mislabelledIds },
   }
 }
 
@@ -113,7 +130,7 @@ export default async function ApplicationsPage({ searchParams }: Props) {
   const paged = applications.slice((page - 1) * perPage, page * perPage)
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl text-[#1A2A1E]">Applications</h1>

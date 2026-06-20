@@ -70,9 +70,13 @@ export async function POST(req: Request) {
         token = assessment.quiz_token
       }
 
-      await db.from('applicants').update({ stage: 'assessment_sent', stage_updated_at: new Date().toISOString() }).eq('id', applicant_id)
+      // Only reset stage if applicant hasn't already progressed past assessment_sent
+      const canResetStage = ['received', 'assessment_sent'].includes(applicant.stage as string)
+      if (canResetStage) {
+        await db.from('applicants').update({ stage: 'assessment_sent', stage_updated_at: new Date().toISOString() }).eq('id', applicant_id)
+      }
       await sendAssessmentEmail(applicant as unknown as Applicant, jobTitle, token, expiresAt)
-      return NextResponse.json({ ok: true, detail: `Assessment email sent immediately. Quiz token: ${token}` })
+      return NextResponse.json({ ok: true, detail: `Assessment email sent immediately.${canResetStage ? '' : ' Stage not changed (applicant already past assessment stage).'}` })
     }
 
     if (type === 'nudge_1' || type === 'nudge_2') {

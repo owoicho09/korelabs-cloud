@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { isAdminAuthenticated } from '@/lib/auth'
-import { sendAssessmentEmail, sendNudge1Email, sendNudge2Email } from '@/lib/email'
+import { sendAssessmentEmail, sendNudge1Email, sendNudge2Email, cancelScheduledEmail } from '@/lib/email'
 import type { Applicant } from '@/lib/types'
 import { addHours, addDays } from 'date-fns'
 
@@ -77,6 +77,11 @@ export async function POST(req: Request) {
         // Schedule fresh nudge emails
         const nudge1At = addHours(new Date(), 48).toISOString()
         const nudge2At = addDays(new Date(), 5).toISOString()
+
+        // Cancel stale scheduled nudges before issuing fresh ones to avoid duplicates
+        const prev = a as { nudge1_resend_id?: string | null; nudge2_resend_id?: string | null }
+        if (prev.nudge1_resend_id) await cancelScheduledEmail(prev.nudge1_resend_id)
+        if (prev.nudge2_resend_id) await cancelScheduledEmail(prev.nudge2_resend_id)
 
         const nudge1Id = await sendNudge1Email(a as unknown as Applicant, roleTitle, quizToken, nudge1At)
         const nudge2Id = await sendNudge2Email(a as unknown as Applicant, roleTitle, quizToken, nudge2At)

@@ -1,11 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { AlertTriangle, RefreshCw, Video, X } from 'lucide-react'
 
 interface StuckCounts {
   assessment_stuck: { count: number; ids: string[] }
   video_pending: { count: number; ids: string[] }
+  mislabelled_video: { count: number; ids: string[] }
 }
 
 interface Props {
@@ -13,13 +15,21 @@ interface Props {
 }
 
 export function StuckBanner({ initial }: Props) {
-  const [counts, setCounts] = useState<StuckCounts>(initial)
+  const [counts, setCounts] = useState<StuckCounts>({
+    assessment_stuck: initial.assessment_stuck,
+    video_pending: initial.video_pending,
+    mislabelled_video: initial.mislabelled_video ?? { count: 0, ids: [] },
+  })
   const [dismissed, setDismissed] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
   if (dismissed) return null
-  if (counts.assessment_stuck.count === 0 && counts.video_pending.count === 0) return null
+  if (
+    counts.assessment_stuck.count === 0 &&
+    counts.video_pending.count === 0 &&
+    counts.mislabelled_video.count === 0
+  ) return null
 
   async function reengageAll(type: 'assessment' | 'video') {
     const ids = type === 'assessment' ? counts.assessment_stuck.ids : counts.video_pending.ids
@@ -92,6 +102,22 @@ export function StuckBanner({ initial }: Props) {
               <Video size={11} className={loading === 'video' ? 'animate-spin' : ''} />
               Send video invite to all
             </button>
+          </div>
+        )}
+
+        {counts.mislabelled_video.count > 0 && (
+          <div className="flex items-center gap-3 bg-white border border-red-300 rounded-lg px-3 py-2 text-sm">
+            <Video size={13} className="text-red-500 shrink-0" />
+            <span className="text-red-800">
+              <strong>{counts.mislabelled_video.count}</strong>{' '}
+              {counts.mislabelled_video.count === 1 ? 'applicant' : 'applicants'} marked &ldquo;Video Done&rdquo; with no recordings
+            </span>
+            <Link
+              href="/admin/applications?stage=assessment_video_done"
+              className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium transition-colors"
+            >
+              Review
+            </Link>
           </div>
         )}
       </div>

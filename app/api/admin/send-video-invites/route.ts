@@ -31,12 +31,22 @@ export async function POST() {
       return NextResponse.json({ ok: true, sent: 0, message: 'No eligible applicants found' })
     }
 
-    // Keep only those with a completed assessment and no videos
+    // Find applicants who already received a video reminder in the last 14 days
+    const { data: recentReminders } = await db
+      .from('email_log')
+      .select('applicant_id')
+      .eq('type', 'video_reminder')
+      .gte('sent_at', new Date(Date.now() - 14 * 86400000).toISOString())
+      .not('applicant_id', 'is', null)
+
+    const recentlySentIds = new Set((recentReminders ?? []).map((r) => r.applicant_id as string))
+
+    // Keep only those with a completed assessment, no videos, and no recent reminder
     const eligible = candidates.filter((a) => {
       const assessments = a.assessments as { quiz_token: string; completed_at: string | null }[] | null
       const completed = assessments?.some((ass) => ass.completed_at)
       const hasVideos = (a.videos as { id: string }[] | null)?.length ?? 0
-      return completed && hasVideos === 0
+      return completed && hasVideos === 0 && !recentlySentIds.has(a.id)
     })
 
     if (eligible.length === 0) {

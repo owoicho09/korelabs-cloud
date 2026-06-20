@@ -39,7 +39,7 @@ async function buildApplicantData(applicantId: string) {
       .order('order_index')
 
     for (const video of videos as Video[]) {
-      const { data: signed } = await db.storage.from('videos').createSignedUrl(video.storage_path, 3600)
+      const { data: signed } = await db.storage.from('videos').createSignedUrl(video.storage_path, 86400)
       if (signed?.signedUrl) {
         const q = questions?.find((q) => q.order_index === video.question_index + 1)
         videoSignedUrls.push({
@@ -93,13 +93,19 @@ export async function POST(req: Request) {
       await sendHiringManagerBatch(valid)
     }
 
-    // Update all applicants to under_review
-    await db
-      .from('applicants')
-      .update({ stage: 'under_review', stage_updated_at: new Date().toISOString() })
-      .in('id', ids)
+    // Only advance stage for applicants currently at assessment_video_done
+    const eligibleForAdvance = valid
+      .filter((d) => (d.applicant.stage as unknown as string) === 'assessment_video_done')
+      .map((d) => d.applicant.id)
 
-    return NextResponse.json({ ok: true, count: valid.length })
+    if (eligibleForAdvance.length > 0) {
+      await db
+        .from('applicants')
+        .update({ stage: 'under_review', stage_updated_at: new Date().toISOString() })
+        .in('id', eligibleForAdvance)
+    }
+
+    return NextResponse.json({ ok: true, count: valid.length, stage_advanced: eligibleForAdvance.length })
   } catch (e) {
     console.error('[notify-hiring-manager] Error:', e)
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed' }, { status: 500 })

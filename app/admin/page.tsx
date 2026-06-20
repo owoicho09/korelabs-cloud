@@ -88,7 +88,7 @@ export default async function AdminOverview() {
   const data = await getDashboardData()
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <div className="mb-8">
         <h1 className="font-display text-2xl text-[#1A2A1E]">Hiring overview</h1>
         <p className="text-sm text-[#637A6F] mt-1">Live pipeline data</p>

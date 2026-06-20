@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   X, ExternalLink, Send, RefreshCw, Video, Archive, CheckCircle,
-  PauseCircle, XCircle, Mail,
+  PauseCircle, XCircle, Mail, Clapperboard,
 } from 'lucide-react'
 import { StageBadge, ScoreBadge } from '@/components/ui/Badge'
 import { formatDate } from '@/lib/utils'
@@ -35,6 +35,7 @@ interface SlideOverData {
     quiz_token: string | null
   } | null
   recent_emails: Array<{ subject: string; type: string; sent_at: string }>
+  video_count: number
 }
 
 interface Props {
@@ -242,6 +243,17 @@ export function ApplicantSlideOver({ applicantId, onClose, onRefresh }: Props) {
 
               {data.assessment?.score !== null && data.assessment?.score !== undefined && (
                 <div className="mb-2"><ScoreBadge score={data.assessment.score} /></div>
+              )}
+
+              {(stage === 'assessment_video_done' || data.video_count > 0) && (
+                <div className={`mb-2 inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+                  data.video_count > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'
+                }`}>
+                  <Clapperboard size={10} />
+                  {data.video_count > 0
+                    ? `${data.video_count} video${data.video_count !== 1 ? 's' : ''} recorded`
+                    : 'No videos — mislabelled'}
+                </div>
               )}
 
               <a href={`mailto:${data.email}`} className="text-xs text-brand hover:underline block">{data.email}</a>
