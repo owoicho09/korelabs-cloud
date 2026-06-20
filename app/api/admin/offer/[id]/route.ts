@@ -14,21 +14,31 @@ async function readTemplate(
   jobSlug: string,
   name: 'offer-letter' | 'contractor-agreement',
 ): Promise<string | null> {
-  if (!jobSlug) return null
-  const base = path.join(CONTRACTS_DIR, jobSlug)
+  const mammoth = await import('mammoth')
+  const { readFile } = await import('fs/promises')
 
-  // 1. Try DOCX via mammoth
-  try {
-    const mammoth = await import('mammoth')
-    const { value } = await mammoth.extractRawText({ path: path.join(base, `${name}.docx`) })
-    return value.trim() || null
-  } catch { /* file not found or unreadable */ }
+  // Search order: slug subfolder → root contracts folder (master templates).
+  // Each location tries .docx first, then .txt.
+  const searchDirs = [
+    ...(jobSlug ? [path.join(CONTRACTS_DIR, jobSlug)] : []),
+    CONTRACTS_DIR,
+  ]
 
-  // 2. Fall back to plain text
-  try {
-    const { readFile } = await import('fs/promises')
-    return await readFile(path.join(base, `${name}.txt`), 'utf-8')
-  } catch { /* not found */ }
+  for (const dir of searchDirs) {
+    // docx — try lowercase then Title-Case-Each-Word (e.g. offer-letter → Offer-Letter)
+    const titleCase = name.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('-')
+    for (const filename of [`${name}.docx`, `${titleCase}.docx`]) {
+      try {
+        const { value } = await mammoth.extractRawText({ path: path.join(dir, filename) })
+        if (value.trim()) return value.trim()
+      } catch { /* not found */ }
+    }
+    // txt
+    try {
+      const txt = await readFile(path.join(dir, `${name}.txt`), 'utf-8')
+      if (txt.trim()) return txt.trim()
+    } catch { /* not found */ }
+  }
 
   return null
 }

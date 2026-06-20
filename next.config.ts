@@ -12,6 +12,7 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['mammoth', 'docx'],
   images: {
     remotePatterns: [
       {
