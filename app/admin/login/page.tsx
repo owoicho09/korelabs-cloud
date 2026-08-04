@@ -1,13 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 function LoginForm() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const from = searchParams.get('from') ?? '/admin'
   const [password, setPassword] = useState('')
@@ -26,7 +25,7 @@ function LoginForm() {
     })
 
     if (res.ok) {
-      router.push(from)
+      window.location.href = from
     } else {
       setError('Incorrect password.')
       setLoading(false)
