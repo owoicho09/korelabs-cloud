@@ -10,6 +10,7 @@ const patchSchema = z.object({
     'received',
     'assessment_sent',
     'assessment_video_done',
+    'internship_offered',
     'under_review',
     'accepted',
     'on_hold',

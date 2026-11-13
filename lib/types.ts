@@ -4,6 +4,7 @@ export type ApplicantStage =
   | 'received'
   | 'assessment_sent'
   | 'assessment_video_done'
+  | 'internship_offered'
   | 'under_review'
   | 'accepted'
   | 'on_hold'
@@ -55,6 +56,8 @@ export interface Applicant {
   nudge1_resend_id: string | null
   nudge2_resend_id: string | null
   video_reminder_resend_id: string | null
+  internship_email_sent_at?: string | null
+  internship_resend_id?: string | null
   stage_updated_at: string | null
   created_at: string
   updated_at: string
@@ -198,6 +201,7 @@ export const STAGE_LABELS: Record<ApplicantStage, string> = {
   received: 'Received',
   assessment_sent: 'Assessment Sent',
   assessment_video_done: 'Video Done',
+  internship_offered: 'Internship Offered',
   under_review: 'Under Review',
   accepted: 'Accepted',
   on_hold: 'On Hold',
@@ -208,6 +212,7 @@ export const PIPELINE_STAGES: ApplicantStage[] = [
   'received',
   'assessment_sent',
   'assessment_video_done',
+  'internship_offered',
   'under_review',
   'accepted',
   'on_hold',

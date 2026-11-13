@@ -618,6 +618,82 @@ export async function sendReminderEmail(
   await logEmail(applicant.id, applicant.email, subject, `reminder_${type}`, resendId, error)
 }
 
+// ─── Internship programme email ──────────────────────────────────────────────
+
+export const INTERNSHIP_REPLY_TO = 'kennkiyoshi@gmail.com'
+
+function escapeHtml(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// Copy comes verbatim from "internship email.txt". Sent with a fixed template
+// (no AI personalisation) so every candidate receives the same wording.
+export async function sendInternshipEmail(
+  applicant: Pick<Applicant, 'id' | 'email' | 'first_name'>,
+  roleTitle: string
+): Promise<{ resendId?: string; error?: string }> {
+  const resend = getResend()
+  const subject = 'An update on your application - KoreLabs'
+  const replySubject = `Internship Registration – ${roleTitle}`
+  const mailto = `mailto:${INTERNSHIP_REPLY_TO}?subject=${encodeURIComponent(replySubject)}`
+  const name = escapeHtml(applicant.first_name)
+  const role = escapeHtml(roleTitle)
+
+  const body = [
+    `Good news! Although you weren't selected for the ${role} position at KoreLabs, your application made it to the final stage, and we believe you have the potential to be a great fit for future opportunities.`,
+    `<strong>You're qualified to join our upcoming Paid Internship Programme</strong>, commencing in two weeks!`,
+    `The programme is designed to help promising candidates gain practical experience and strengthen their skills ahead of future opportunities with us.`,
+    `Registration is currently ongoing.`,
+    `If you're interested, simply reply to this email with the subject line: <strong>Internship Registration – ${role}</strong> and we'll share the details. <a href="${mailto}" style="color:#4a9270">${INTERNSHIP_REPLY_TO}</a>`,
+    `We look forward to hearing from you!`,
+    `Best regards,<br>KoreLabs Recruitment Team`,
+  ].join('\n')
+  const html = buildEmailHtml(`Hi ${name},`, body)
+
+  const text = `Hi ${applicant.first_name},
+
+Good news! Although you weren't selected for the ${roleTitle} position at KoreLabs, your application made it to the final stage, and we believe you have the potential to be a great fit for future opportunities.
+
+You're qualified to join our upcoming Paid Internship Programme, commencing in two weeks!
+
+The programme is designed to help promising candidates gain practical experience and strengthen their skills ahead of future opportunities with us.
+
+Registration is currently ongoing.
+
+If you're interested, simply reply to this email with the subject line: ${replySubject} and we'll share the details. ${INTERNSHIP_REPLY_TO}
+
+We look forward to hearing from you!
+
+Best regards,
+KoreLabs Recruitment Team`
+
+  if (!resend) {
+    const error = 'RESEND_API_KEY not configured'
+    await logEmail(applicant.id, applicant.email, subject, 'internship_offer', undefined, error)
+    return { error }
+  }
+
+  let resendId: string | undefined
+  let error: string | undefined
+  try {
+    const result = await resend.emails.send({
+      from: FROM,
+      to: applicant.email,
+      replyTo: INTERNSHIP_REPLY_TO,
+      subject,
+      html,
+      text,
+    })
+    if (result.error) error = result.error.message
+    resendId = result.data?.id
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Unknown error'
+  }
+
+  await logEmail(applicant.id, applicant.email, subject, 'internship_offer', resendId, error)
+  return { resendId, error }
+}
+
 // ─── Bulk custom email ────────────────────────────────────────────────────────
 
 export async function sendBulkCustomEmail(

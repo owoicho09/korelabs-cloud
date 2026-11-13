@@ -81,7 +81,7 @@ async function getDashboardData() {
 }
 
 const ORDERED_STAGES: ApplicantStage[] = [
-  'received', 'assessment_sent', 'assessment_video_done', 'under_review', 'accepted', 'on_hold', 'archived',
+  'received', 'assessment_sent', 'assessment_video_done', 'internship_offered', 'under_review', 'accepted', 'on_hold', 'archived',
 ]
 
 export default async function AdminOverview() {

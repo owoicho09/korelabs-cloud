@@ -40,6 +40,7 @@ const NEXT_STEP_TEXT: Record<ApplicantStage, string> = {
   received: 'Your application is with our team. We will review it carefully and move you forward within a few business days.',
   assessment_sent: 'You should have received an assessment link by email. Complete the quiz and record a short video introduction to move forward.',
   assessment_video_done: 'We have received your assessment and video. Our hiring team is reviewing your full application — you will hear from us if your profile matches.',
+  internship_offered: 'Your application reached the final stage. Please check your email for details about our Paid Internship Programme.',
   under_review: 'Your application is with the hiring manager for final review. You will hear from us with a decision soon.',
   accepted: 'Congratulations — you have been offered a role at KoreLabs. Our team will be in touch with onboarding details.',
   on_hold: 'Your application is on hold. We will be in touch if anything changes.',
